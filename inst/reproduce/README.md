@@ -1,21 +1,44 @@
-# First simulation experiment
+# Simulation experiments
 
-`scenario1.R` reruns the first main-paper simulation with the exported
-`mecCox` fitting functions. It is intentionally limited to Scenario 1. Run it
-after installing the package, for example with `R CMD INSTALL mecCox` from
-the checkout's parent directory.
+`scenario1.R` and `scenario2.R` rerun the two main-paper simulation designs
+with the exported `mecCox` fitting functions. Install the package first, for
+example with `R CMD INSTALL mecCox` from the checkout's parent directory.
+Scenario 2 also requires `dbarts` and `ranger`:
+
+```r
+install.packages(c("dbarts", "ranger"))
+```
 
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
+Rscript mecCox/inst/reproduce/scenario2.R --output=scenario2-output
 ```
 
-For a short installation/code-path check:
+For short installation and code-path checks:
 
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --quick --output=scenario1-quick
+Rscript mecCox/inst/reproduce/scenario2.R --quick --output=scenario2-quick
 ```
 
-The complete run has 1,000 replications at each of 15 combinations of
+The scripts request 20 workers by default and cap the actual worker count
+at the number of detected logical cores and replications per design cell.
+Choose another limit with `--cores=N`, or use `--cores=1` for serial execution:
+
+```sh
+Rscript mecCox/inst/reproduce/scenario1.R --cores=8 --output=scenario1-output
+```
+
+The PSOCK backend works on Windows, macOS, and Linux. A worker pool is reused
+across design cells. Only Monte Carlo replications run in parallel; reference
+target computation, checkpoint writing, summaries, and plots run in the main
+R process. Each replication receives its own deterministic seed, so changing
+worker count or scheduling preserves its data and fits in the same R and
+package environment.
+
+## Scenario 1: linear source selection and prognosis
+
+The full run has 1,000 replications at each of 15 combinations of
 `n1 = 200, 250, 300, 350, 400` and `n0/n1 = 2, 3, 4`. The source and outcome
 models have 50 independent standard-normal covariates. The first five affect
 source membership, the first ten affect the event hazard, and the remaining
@@ -46,25 +69,86 @@ intercept, form the KL calibration basis. Estimated source probabilities are
 clipped to `[0.01, 0.99]` when constructing analysis weights. Both methods
 use a Breslow weighted Cox fit.
 
-The output directory contains:
+The short `--quick` run retains `n1 = 200` and `n0/n1 = 2`, with two
+replications and a reference population of 2,000 treated and 4,000 external
+controls. It retains all 50 covariates, ten folds, and five landmarks.
+
+## Scenario 2: increasing nonlinearity
+
+The full run uses 10 independent standard-normal covariates, the same five
+treated sample sizes, and `n0/n1 = 4`. It has 1,000 replications at each of 15
+sample-size and nonlinearity combinations:
+
+| Setting | Source-selection multiplier `kappa_pi` | Prognostic multiplier `kappa_m` |
+| --- | ---: | ---: |
+| None | 0 | 0 |
+| Mild | 1 | 2 |
+| Severe | 2 | 5 |
+
+The source logit adds `kappa_pi * r_pi(X)` to Scenario 1's linear component;
+the control log-hazard adds `kappa_m * r_m(X)` to its linear component. The
+nonlinear terms are:
+
+```r
+r_pi <- 0.70 * sin(1.25 * X1) + 0.45 * (X2^2 - 1) -
+  0.55 * (as.numeric(X3 > 0) - 0.5) + 0.35 * X4 * X5 +
+  0.25 * (cos(X1 + X2) - exp(-1))
+r_m <- 0.45 * sin(X2) + 0.35 * (X3^2 - 1) +
+  0.30 * (as.numeric(X4 > 0) - 0.5) + 0.25 * X1 * X5 +
+  0.20 * (cos(X2 + X5) - exp(-1))
+```
+
+The remaining event-time, censoring, probability-clipping, and landmark
+settings follow Scenario 1. Reference targets are computed separately for
+each nonlinearity setting using 30,000 treated and 60,000 external controls.
+The three logistic ATT-IPW comparators still share one point estimate. The
+two MEC-Cox variants use cross-fitted BART source
+probabilities and either Cox or RSF control-survival predictions, with ten
+folds and five landmarks. The full script uses 100 BART trees, 1,000 posterior
+draws, 500 burn-in iterations, and shrinkage parameter 2. The RSF uses 500
+trees, with `mtry` and minimum node size tuned within each training fold;
+the fallback minimum node size is 15.
+The two MEC-Cox variants use the same BART settings, folds, and seeds, so
+their source-propensity predictions agree. The script and metadata record
+the learner settings.
+The reproduction script fixes these BART settings, while the original study
+code tuned BART within training folds. It reproduces the study design with
+the public API; its fitting sequence and numerical results can differ from
+those underlying the paper's figure.
+
+The short `--quick` run keeps all three nonlinearity settings, but uses
+`n1 = 200`, two replications per setting, and reference populations of 2,000
+treated and 4,000 external controls. It uses 25 BART trees, 50 posterior
+draws, 25 burn-in iterations, and 100 RSF trees without tuning. Ten-fold
+cross-fitting and five landmarks are retained. It exercises both MEC-Cox
+variants. Quick-run results cannot establish simulation performance.
+
+## Output and reproducibility
+
+Each output directory contains:
 
 - `replications.csv`: one row per replication and method, including a visible
   error message for any failed fit.
-- `checkpoint_n1-*_n0-*.csv`: one file written after each completed design
+- `checkpoint_*.csv`: one file written after each completed design
   cell. These preserve finished cells if a long run is interrupted; the script
   does not automatically resume from them.
 - `summary.csv`: nominal 95% Wald coverage, Monte Carlo bias and RMSE on the
   **log-hazard-ratio** scale, with counts of successful and failed fits.
-- `scenario1.pdf`: nine panels arranged by cohort-size ratio and metric.
-- `run_metadata.rds`: design, reference target, quick/full flag, and R session.
+- `scenario1.pdf` or `scenario2.pdf`: nine panels arranged by cohort-size
+  ratio or nonlinearity setting, respectively, and performance metric.
+- `run_metadata.rds`: design, reference target(s), quick/full flag, requested
+  and actual worker counts, and R session.
+- `reference_targets.csv` in Scenario 2: the reference log-hazard ratio for
+  each nonlinearity setting.
 
-The deterministic seeds make this script rerunnable, but the package API and
-replication stream are not a bit-for-bit replay of the earlier private
-parallel code used to produce the published figure. The package's corrected
-ATT-IPW sandwich also differentiates the clipped analysis weights locally;
+The deterministic seeds make each script rerunnable, but the package API,
+learner tuning, and replication streams are not a bit-for-bit replay of the
+earlier private parallel code used to produce the paper's figures. The
+package's corrected ATT-IPW sandwich also differentiates the clipped analysis
+weights locally;
 its values can differ from an earlier correction when fitted probabilities
 cross a clipping boundary. Results should be compared at the Monte Carlo
 level; a quick run cannot establish performance.
 Before interpreting a full run, check `summary.csv` for failures and inspect
-their messages in `replications.csv`. This script does not infer or replace
+their messages in `replications.csv`. These scripts do not infer or replace
 missing results when a fit fails.

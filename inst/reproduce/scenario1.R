@@ -2,25 +2,23 @@
 # Run from any directory after installing mecCox:
 #   Rscript path/to/mecCox/inst/reproduce/scenario1.R --output=simulation1-output
 # A short code-path check is available with --quick; it is not a paper result.
+# Replications use up to 20 workers by default; use --cores=1 for a serial run.
+
+script_option <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+if (length(script_option) != 1L) {
+  stop("Run this file with Rscript; see inst/reproduce/README.md.", call. = FALSE)
+}
+script_path <- normalizePath(sub("^--file=", "", script_option), mustWork = TRUE)
+source(file.path(dirname(script_path), "simulation_helpers.R"), local = TRUE)
+options <- parse_simulation_arguments("scenario1-output")
 
 suppressPackageStartupMessages({
   library(mecCox)
   library(survival)
 })
 
-arguments <- commandArgs(trailingOnly = TRUE)
-quick_run <- "--quick" %in% arguments
-output_option <- grep("^--output=", arguments, value = TRUE)
-unknown <- arguments[!grepl("^(--quick|--output=.+)$", arguments)]
-if (length(unknown) || length(output_option) > 1L) {
-  stop("Use only --quick and one --output=directory argument.", call. = FALSE)
-}
-
-output_directory <- if (length(output_option)) {
-  sub("^--output=", "", output_option)
-} else {
-  "scenario1-output"
-}
+quick_run <- options$quick_run
+output_directory <- options$output_directory
 dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
 
 design <- list(
@@ -309,48 +307,69 @@ plot_results <- function(summary, output_file) {
                    horiz = TRUE, bty = "n", cex = 0.85)
 }
 
-message("Computing the ATT Cox-projection reference target ...")
-target <- compute_reference_target(design)
-message(sprintf("Reference log-hazard ratio: %.6f", target))
-saveRDS(list(design = design, quick_run = quick_run, target = target,
-             session = utils::sessionInfo()),
-        file.path(output_directory, "run_metadata.rds"))
+run_scenario1 <- function(design, options) {
+  output_directory <- options$output_directory
+  worker_count <- choose_worker_count(options$cores, design$replications)
+  message(sprintf("Using %d worker(s); requested %d.",
+                  worker_count, options$cores))
+  message("Computing the ATT Cox-projection reference target ...")
+  target <- compute_reference_target(design)
+  message(sprintf("Reference log-hazard ratio: %.6f", target))
+  execution <- list(requested_cores = options$cores, workers = worker_count,
+                    backend = if (worker_count > 1L) "PSOCK" else "serial",
+                    rng_kind = RNGkind())
+  saveRDS(list(design = design, quick_run = options$quick_run, target = target,
+               execution = execution, session = utils::sessionInfo()),
+          file.path(output_directory, "run_metadata.rds"))
 
-result_cells <- list()
-cell_index <- 0L
-for (multiplier in design$control_multipliers) {
-  for (treated_count in design$treated_sizes) {
-    message(sprintf("Running n1=%d, n0=%d (%d replications)",
-                    treated_count, multiplier * treated_count,
-                    design$replications))
-    cell_rows <- vector("list", design$replications)
-    for (replicate in seq_len(design$replications)) {
-      cell_rows[[replicate]] <- run_replication(
-        multiplier, treated_count, replicate, target, design
+  worker_functions <- c("source_probability", "draw_source_covariates",
+                        "control_log_hazard", "draw_observed_data",
+                        "make_result", "run_replication")
+  cluster <- start_simulation_cluster(
+    worker_count, worker_functions, envir = environment(run_replication)
+  )
+  on.exit({
+    if (!is.null(cluster)) parallel::stopCluster(cluster)
+  }, add = TRUE)
+
+  result_cells <- list()
+  cell_index <- 0L
+  for (multiplier in design$control_multipliers) {
+    for (treated_count in design$treated_sizes) {
+      message(sprintf("Running n1=%d, n0=%d (%d replications)",
+                      treated_count, multiplier * treated_count,
+                      design$replications))
+      cell_rows <- run_simulation_replications(
+        design$replications, run_replication,
+        arguments = list(multiplier = multiplier, treated_count = treated_count,
+                         target = target, design = design),
+        cluster = cluster
       )
+      cell_results <- do.call(rbind, cell_rows)
+      checkpoint <- sprintf("checkpoint_n1-%d_n0-%d.csv",
+                            treated_count, multiplier * treated_count)
+      utils::write.csv(cell_results,
+                       file.path(output_directory, checkpoint), row.names = FALSE)
+      message("Completed cell; checkpoint: ", checkpoint)
+      cell_index <- cell_index + 1L
+      result_cells[[cell_index]] <- cell_results
     }
-    cell_results <- do.call(rbind, cell_rows)
-    checkpoint <- sprintf("checkpoint_n1-%d_n0-%d.csv",
-                          treated_count, multiplier * treated_count)
-    utils::write.csv(cell_results,
-                     file.path(output_directory, checkpoint), row.names = FALSE)
-    message("Completed cell; checkpoint: ", checkpoint)
-    cell_index <- cell_index + 1L
-    result_cells[[cell_index]] <- cell_results
   }
+
+  results <- do.call(rbind, result_cells)
+  summary <- summarize_results(results)
+  utils::write.csv(results, file.path(output_directory, "replications.csv"),
+                   row.names = FALSE)
+  utils::write.csv(summary, file.path(output_directory, "summary.csv"),
+                   row.names = FALSE)
+  plot_results(summary, file.path(output_directory, "scenario1.pdf"))
+
+  print(summary, row.names = FALSE, digits = 4)
+  if (any(summary$failed > 0L)) {
+    warning("Some fits failed; inspect the error column in replications.csv.",
+            call. = FALSE)
+  }
+  message("Results written to: ", normalizePath(output_directory))
 }
 
-results <- do.call(rbind, result_cells)
-summary <- summarize_results(results)
-utils::write.csv(results, file.path(output_directory, "replications.csv"),
-                 row.names = FALSE)
-utils::write.csv(summary, file.path(output_directory, "summary.csv"),
-                 row.names = FALSE)
-plot_results(summary, file.path(output_directory, "scenario1.pdf"))
-
-print(summary, row.names = FALSE, digits = 4)
-if (any(summary$failed > 0L)) {
-  warning("Some fits failed; inspect the error column in replications.csv.",
-          call. = FALSE)
-}
-message("Results written to: ", normalizePath(output_directory))
+run_scenario1(design, options)
