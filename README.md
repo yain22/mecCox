@@ -117,9 +117,29 @@ Rscript mecCox/inst/reproduce/scenario2.R --quick --output=scenario2-quick
 `--quick` uses two replications per retained design cell, one treated sample
 size, and a smaller superpopulation reference; Scenario 2 also reduces the
 BART and RSF settings and retains all three nonlinearity settings. These runs
-check the code path and are not estimates from the paper's simulation. See the
-[reproduction notes](inst/reproduce/README.md) for the exact generator and
-interpretation of the output.
+check the code path and are not estimates from the paper's simulation.
+
+You can also run either script with `source()` in the R console or RStudio.
+The configuration block near the top of each script sets `quick_run`, `cores`,
+and `output_directory`. **The default is a full simulation.** For a short
+check, edit that block inside `scenario1.R` to:
+
+```r
+quick_run <- TRUE
+cores <- 2L
+output_directory <- "scenario1-quick"
+```
+
+Then run the whole file with RStudio's **Source** button, or from R:
+
+```r
+source("path/to/mecCox/inst/reproduce/scenario1.R")
+```
+
+For Scenario 2, edit its configuration block and source `scenario2.R` instead.
+When using downloaded scripts, keep `simulation_helpers.R` in the same folder.
+The [reproduction notes](inst/reproduce/README.md) explain both ways to run the
+scripts, the exact generators, and interpretation of the output.
 
 ## Methods and interpretation
 
