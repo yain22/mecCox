@@ -5,6 +5,7 @@ if (!file.exists(helper_path)) {
   helper_path <- system.file("reproduce", "simulation_helpers.R",
                              package = "mecCox")
 }
+helper_path <- normalizePath(helper_path, mustWork = TRUE)
 simulation_helpers <- new.env(parent = baseenv())
 source(helper_path, local = simulation_helpers)
 
@@ -33,6 +34,56 @@ testthat::test_that("simulation arguments have useful defaults and reject mistak
   for (arguments in invalid_arguments) {
     testthat::expect_error(parse_arguments("example-output", arguments),
                            "cores|Use")
+  }
+})
+
+testthat::test_that("both scripts can be sourced from another working directory", {
+  reproduction_directory <- dirname(helper_path)
+  scratch <- tempfile("simulation source ")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  previous_directory <- setwd(tempdir())
+  on.exit(setwd(previous_directory), add = TRUE)
+
+  for (scenario in c("scenario1", "scenario2")) {
+    script <- file.path(reproduction_directory, paste0(scenario, ".R"))
+    expressions <- as.list(parse(script))
+    settings_index <- which(vapply(expressions, function(expression) {
+      is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+        identical(expression[[2L]], as.name("options"))
+    }, logical(1)))
+    # Exercise the real startup code without starting a full simulation in tests.
+    startup <- expressions[seq_len(settings_index)]
+    script_copy <- file.path(scratch, paste0(scenario, ".R"))
+    writeLines(unlist(lapply(startup, deparse)), script_copy)
+    file.copy(helper_path, file.path(scratch, "simulation_helpers.R"),
+              overwrite = TRUE)
+
+    execution <- new.env(parent = baseenv())
+    execution$commandArgs <- function(trailingOnly = FALSE) {
+      if (trailingOnly) "--unrelated-wrapper-option" else c("R", "--file=wrapper.R")
+    }
+    source(script_copy, local = execution)
+    testthat::expect_identical(
+      execution$options,
+      list(quick_run = FALSE, output_directory = paste0(scenario, "-output"),
+           cores = 20L)
+    )
+    testthat::expect_identical(
+      normalizePath(execution$helper_candidates[1L]),
+      normalizePath(file.path(scratch, "simulation_helpers.R"))
+    )
+
+    # Settings edited in the file also work with RStudio's Source/chdir mode.
+    startup[[1L]] <- quote(quick_run <- TRUE)
+    startup[[2L]] <- quote(cores <- 2L)
+    startup[[3L]] <- quote(output_directory <- "quick output")
+    writeLines(unlist(lapply(startup, deparse)), script_copy)
+    source(script_copy, local = execution, chdir = TRUE)
+    testthat::expect_identical(
+      execution$options,
+      list(quick_run = TRUE, output_directory = "quick output", cores = 2L)
+    )
   }
 })
 
