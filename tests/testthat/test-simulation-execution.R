@@ -16,6 +16,10 @@ testthat::test_that("simulation arguments have useful defaults and reject mistak
     defaults,
     list(quick_run = FALSE, output_directory = "example-output", cores = 20L)
   )
+  testthat::expect_identical(
+    parse_arguments(NULL, character()),
+    list(quick_run = FALSE, output_directory = NULL, cores = 20L)
+  )
 
   chosen <- parse_arguments(
     "example-output", c("--quick", "--cores=2", "--output=a folder")
@@ -66,7 +70,7 @@ testthat::test_that("both scripts can be sourced from another working directory"
     source(script_copy, local = execution)
     testthat::expect_identical(
       execution$options,
-      list(quick_run = FALSE, output_directory = paste0(scenario, "-output"),
+      list(quick_run = FALSE, output_directory = NULL,
            cores = 20L)
     )
     testthat::expect_identical(
@@ -106,6 +110,116 @@ testthat::test_that("worker limits respect the request and number of replication
   testthat::expect_null(
     simulation_helpers$start_simulation_cluster(1L, character())
   )
+})
+
+testthat::test_that("simulation plots preserve the active graphics device", {
+  grDevices::pdf(NULL, width = 14, height = 12)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  device <- grDevices::dev.cur()
+  old <- graphics::par(c("mar", "oma", "mfrow", "las"))
+  first_summary <- data.frame(
+    ratio = "1:2", n1 = 200L,
+    method = c("Naive", "Robust sandwich", "Corrected sandwich", "MEC-Cox"),
+    coverage = c(0.8, 0.9, 0.95, 0.95),
+    bias = c(0.1, 0.1, 0.1, 0.05), rmse = c(0.2, 0.2, 0.2, 0.1)
+  )
+  simulation_helpers$plot_scenario1_results(first_summary)
+  testthat::expect_identical(grDevices::dev.cur(), device)
+  testthat::expect_equal(graphics::par(names(old)), old)
+
+  settings <- data.frame(setting = c("None", "Mild", "Severe"))
+  second_summary <- expand.grid(
+    setting = settings$setting,
+    method = c("Naive", "Robust sandwich", "Corrected sandwich",
+               "MEC-Cox (BART/Cox)", "MEC-Cox (BART/RSF)"),
+    stringsAsFactors = FALSE
+  )
+  second_summary$n1 <- 200L
+  second_summary$coverage <- 0.95
+  second_summary$bias <- 0
+  second_summary$rmse <- 0.1
+  simulation_helpers$plot_scenario2_results(second_summary, settings)
+  testthat::expect_identical(grDevices::dev.cur(), device)
+  testthat::expect_equal(graphics::par(names(old)), old)
+
+  # RStudio panes can be much smaller than the optional publication PDF.
+  grDevices::dev.off()
+  grDevices::pdf(NULL, width = 4, height = 3)
+  device <- grDevices::dev.cur()
+  old <- graphics::par(c("mar", "oma", "mfrow", "las", "cex", "mgp"))
+  full_first_summary <- do.call(rbind, lapply(c("1:2", "1:3", "1:4"), function(ratio) {
+    rows <- first_summary
+    rows$ratio <- ratio
+    rows
+  }))
+  simulation_helpers$plot_scenario1_results(full_first_summary)
+  testthat::expect_identical(grDevices::dev.cur(), device)
+  testthat::expect_equal(graphics::par(names(old)), old)
+  simulation_helpers$plot_scenario2_results(second_summary, settings)
+  testthat::expect_identical(grDevices::dev.cur(), device)
+  testthat::expect_equal(graphics::par(names(old)), old)
+})
+
+testthat::test_that("simulation drivers retain results without creating files", {
+  scratch <- tempfile("simulation display ")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  previous_directory <- setwd(scratch)
+  on.exit(setwd(previous_directory), add = TRUE)
+
+  for (scenario in c("scenario1", "scenario2")) {
+    expressions <- as.list(parse(file.path(dirname(helper_path),
+                                           paste0(scenario, ".R"))))
+    execution <- new.env(parent = simulation_helpers)
+    for (expression in expressions) {
+      if (is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+          is.call(expression[[3L]]) &&
+          identical(expression[[3L]][[1L]], as.name("function"))) {
+        eval(expression, envir = execution)
+      }
+    }
+    execution$compute_reference_target <- function(...) 0
+    execution$options <- list(quick_run = TRUE, cores = 1L,
+                               output_directory = NULL)
+    execution$design <- list(replications = 1L, treated_sizes = 2L,
+                              control_multipliers = 2L, control_multiplier = 4L)
+    execution$settings <- data.frame(setting_id = 1L, setting = "None",
+                                     kappa_pi = 0, kappa_m = 0)
+    if (scenario == "scenario1") {
+      execution$run_replication <- function(multiplier, treated_count, replicate,
+                                             target, design) {
+        make_result(multiplier, treated_count, replicate, "MEC-Cox", target,
+                     estimate = 0.1, standard_error = 0.2)
+      }
+    } else {
+      execution$run_replication <- function(setting, treated_count, replicate,
+                                             target, design) {
+        make_result(setting, treated_count, replicate, "MEC-Cox (BART/Cox)",
+                     target, design, estimate = 0.1, standard_error = 0.2)
+      }
+    }
+    environment(execution$run_replication) <- execution
+
+    # Run the script's final assignments, with cheap deterministic fits, so
+    # the test checks the real driver and the objects exposed to the user.
+    result_names <- paste0(scenario, c("_results", "_summary", "_replications",
+                                       "_targets"))
+    for (expression in expressions) {
+      if (is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+          as.character(expression[[2L]]) %in% result_names) {
+        invisible(capture.output(suppressMessages(eval(expression, execution))))
+      }
+    }
+    answer <- execution[[paste0(scenario, "_results")]]
+    testthat::expect_s3_class(answer$summary, "data.frame")
+    testthat::expect_s3_class(answer$replications, "data.frame")
+    testthat::expect_type(answer$metadata, "list")
+    testthat::expect_identical(execution[[paste0(scenario, "_summary")]],
+                               answer$summary)
+    testthat::expect_identical(execution[[paste0(scenario, "_replications")]],
+                               answer$replications)
+    testthat::expect_length(list.files(scratch, all.files = TRUE, no.. = TRUE), 0L)
+  }
 })
 
 testthat::test_that("serial and socket workers preserve per-replication RNG results", {
