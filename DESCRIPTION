@@ -1,0 +1,27 @@
+Package: mecCox
+Title: Prognostic Balance for ATT-Weighted Cox Regression
+Version: 0.1.0
+Authors@R: person("Se Yoon", "Lee", email = "seyoonlee.stat.math@gmail.com", role = c("aut", "cre"))
+Description: Fits marginal Cox comparisons with external controls. Provides an
+    unweighted reference, inverse-probability weighting for the average
+    treatment effect in the treated (ATT), and machine-learning-assisted
+    entropy calibration of the external-control weights. Cross-fitted
+    prognostic survival predictions can enter the calibration constraints.
+    Includes diagnostics for weight stability and predicted-risk balance.
+License: MIT + file LICENSE
+URL: https://github.com/yain22/mecCox
+BugReports: https://github.com/yain22/mecCox/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends: R (>= 4.2.0)
+Imports:
+    stats,
+    survival
+Suggests:
+    brulee,
+    dbarts,
+    ranger,
+    testthat (>= 3.0.0),
+    torch
+Config/testthat/edition: 3
