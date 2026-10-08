@@ -1,14 +1,16 @@
 # Reproduce the paper's first simulation experiment with the public mecCox API.
 # Run from any directory after installing mecCox:
-#   Rscript path/to/mecCox/inst/reproduce/scenario1.R --output=simulation1-output
+#   Rscript path/to/mecCox/inst/reproduce/scenario1.R
 # A short code-path check is available with --quick; it is not a paper result.
 # Replications use up to 20 workers by default; use --cores=1 for a serial run.
 # In the R console or RStudio, edit the three settings below, then source this
 # file (or run it from the editor). Rscript arguments override these settings.
+# Results stay in R, with plots and a summary viewer. Set output_directory to
+# a folder path only when you also want CSV, metadata, and PDF files.
 
 quick_run <- FALSE
 cores <- 20L
-output_directory <- "scenario1-output"
+output_directory <- NULL
 
 # source() records the current file in an `ofile` frame. Selected lines in an
 # editor have no such frame, so also look in the working directory and package.
@@ -34,6 +36,10 @@ if (!length(helper_candidates)) {
        call. = FALSE)
 }
 source(helper_candidates[1L], local = TRUE)
+if (!exists("plot_scenario1_results", mode = "function", inherits = FALSE)) {
+  stop("Update mecCox or keep the current simulation_helpers.R beside ",
+       "scenario1.R before starting the simulation.", call. = FALSE)
+}
 
 # A sourced file must not interpret arguments belonging to an outer R script.
 arguments <- if (interactive() || length(source_files)) {
@@ -56,7 +62,6 @@ suppressPackageStartupMessages({
 
 quick_run <- options$quick_run
 output_directory <- options$output_directory
-dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
 
 design <- list(
   seed = 20260427L,
@@ -290,62 +295,12 @@ summarize_results <- function(results) {
                        "MEC-Cox"))), ]
 }
 
-plot_results <- function(summary, output_file) {
-  methods <- c("Naive", "Robust sandwich", "Corrected sandwich", "MEC-Cox")
-  colors <- c("gray25", "#0072B2", "#009E73", "#D55E00")
-  line_types <- c(3L, 2L, 4L, 1L)
-  symbols <- c(4L, 1L, 2L, 16L)
-  metrics <- c(coverage = "Coverage", bias = "Bias", rmse = "RMSE")
-  ratios <- unique(summary$ratio)
-
-  grDevices::pdf(output_file, width = 14, height = 3.1 * length(ratios) + 2.5)
-  panel_count <- 3L * length(ratios)
-  panel_layout <- matrix(seq_len(panel_count), ncol = 3L, byrow = TRUE)
-  panel_layout <- rbind(panel_layout, rep(panel_count + 1L, 3L))
-  graphics::layout(panel_layout,
-                   heights = c(rep(1, length(ratios)), 0.20))
-  old <- graphics::par(mar = c(4, 4.2, 3, 1),
-                       oma = c(0, 0, 1.5, 0), las = 1)
-  on.exit({
-    graphics::par(old)
-    grDevices::dev.off()
-  }, add = TRUE)
-  panel_index <- 0L
-
-  for (ratio in ratios) {
-    for (metric in names(metrics)) {
-      panel_index <- panel_index + 1L
-      panel_data <- summary[summary$ratio == ratio, , drop = FALSE]
-      observed <- panel_data[[metric]][is.finite(panel_data[[metric]])]
-      limits <- if (length(observed)) range(observed) else c(0, 1)
-      if (diff(limits) < 1e-8) limits <- limits + c(-0.01, 0.01)
-      if (metric == "coverage") limits <- range(c(limits, 0.95))
-      if (metric == "bias") limits <- range(c(limits, 0))
-      graphics::plot(range(panel_data$n1), limits, type = "n",
-                     xlab = expression(n[1]), ylab = metrics[metric],
-                     main = sprintf("(%s) %s, n1:n0 = %s",
-                                    letters[panel_index], metrics[metric], ratio))
-      if (metric == "coverage") graphics::abline(h = 0.95, col = "gray70")
-      if (metric == "bias") graphics::abline(h = 0, col = "gray70")
-      for (index in seq_along(methods)) {
-        method_data <- panel_data[panel_data$method == methods[index], ]
-        method_data <- method_data[order(method_data$n1), ]
-        graphics::lines(method_data$n1, method_data[[metric]],
-                        col = colors[index], lty = line_types[index], lwd = 1.5)
-        graphics::points(method_data$n1, method_data[[metric]],
-                         col = colors[index], pch = symbols[index])
-      }
-    }
-  }
-  graphics::par(mar = c(0, 0, 0, 0))
-  graphics::plot.new()
-  graphics::legend("center", legend = methods,
-                   col = colors, lty = line_types, pch = symbols,
-                   horiz = TRUE, bty = "n", cex = 0.85)
-}
-
 run_scenario1 <- function(design, options) {
   output_directory <- options$output_directory
+  save_output <- !is.null(output_directory)
+  if (save_output) {
+    dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
+  }
   worker_count <- choose_worker_count(options$cores, design$replications)
   message(sprintf("Using %d worker(s); requested %d.",
                   worker_count, options$cores))
@@ -355,9 +310,11 @@ run_scenario1 <- function(design, options) {
   execution <- list(requested_cores = options$cores, workers = worker_count,
                     backend = if (worker_count > 1L) "PSOCK" else "serial",
                     rng_kind = RNGkind())
-  saveRDS(list(design = design, quick_run = options$quick_run, target = target,
-               execution = execution, session = utils::sessionInfo()),
-          file.path(output_directory, "run_metadata.rds"))
+  metadata <- list(design = design, quick_run = options$quick_run, target = target,
+                   execution = execution, session = utils::sessionInfo())
+  if (save_output) {
+    saveRDS(metadata, file.path(output_directory, "run_metadata.rds"))
+  }
 
   worker_functions <- c("source_probability", "draw_source_covariates",
                         "control_log_hazard", "draw_observed_data",
@@ -383,11 +340,13 @@ run_scenario1 <- function(design, options) {
         cluster = cluster
       )
       cell_results <- do.call(rbind, cell_rows)
-      checkpoint <- sprintf("checkpoint_n1-%d_n0-%d.csv",
-                            treated_count, multiplier * treated_count)
-      utils::write.csv(cell_results,
-                       file.path(output_directory, checkpoint), row.names = FALSE)
-      message("Completed cell; checkpoint: ", checkpoint)
+      if (save_output) {
+        checkpoint <- sprintf("checkpoint_n1-%d_n0-%d.csv",
+                              treated_count, multiplier * treated_count)
+        utils::write.csv(cell_results,
+                         file.path(output_directory, checkpoint), row.names = FALSE)
+      }
+      message("Completed cell.")
       cell_index <- cell_index + 1L
       result_cells[[cell_index]] <- cell_results
     }
@@ -395,18 +354,32 @@ run_scenario1 <- function(design, options) {
 
   results <- do.call(rbind, result_cells)
   summary <- summarize_results(results)
-  utils::write.csv(results, file.path(output_directory, "replications.csv"),
-                   row.names = FALSE)
-  utils::write.csv(summary, file.path(output_directory, "summary.csv"),
-                   row.names = FALSE)
-  plot_results(summary, file.path(output_directory, "scenario1.pdf"))
+  if (save_output) {
+    utils::write.csv(results, file.path(output_directory, "replications.csv"),
+                     row.names = FALSE)
+    utils::write.csv(summary, file.path(output_directory, "summary.csv"),
+                     row.names = FALSE)
+    plot_scenario1_results(summary, file.path(output_directory, "scenario1.pdf"))
+  }
 
   print(summary, row.names = FALSE, digits = 4)
   if (any(summary$failed > 0L)) {
-    warning("Some fits failed; inspect the error column in replications.csv.",
+    warning("Some fits failed; inspect the error column in the replication results.",
             call. = FALSE)
   }
-  message("Results written to: ", normalizePath(output_directory))
+  if (save_output) {
+    message("Results written to: ", normalizePath(output_directory))
+  }
+  invisible(list(replications = results, summary = summary, metadata = metadata))
 }
 
-run_scenario1(design, options)
+scenario1_results <- run_scenario1(design, options)
+scenario1_summary <- scenario1_results$summary
+scenario1_replications <- scenario1_results$replications
+
+# Keep the completed results available even if a display window cannot open.
+if (interactive()) {
+  utils::View(scenario1_replications, title = "Scenario 1: replication results")
+  utils::View(scenario1_summary, title = "Scenario 1: simulation summary")
+  plot_scenario1_results(scenario1_summary)
+}

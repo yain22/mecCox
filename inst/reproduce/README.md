@@ -9,60 +9,78 @@ Scenario 2 also requires `dbarts` and `ranger`:
 install.packages(c("dbarts", "ranger"))
 ```
 
-## Run from a terminal
-
-```sh
-Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
-Rscript mecCox/inst/reproduce/scenario2.R --output=scenario2-output
-```
-
-For short installation and code-path checks:
-
-```sh
-Rscript mecCox/inst/reproduce/scenario1.R --quick --output=scenario1-quick
-Rscript mecCox/inst/reproduce/scenario2.R --quick --output=scenario2-quick
-```
-
 ## Run from R or RStudio
 
-Both scripts also support `source()` and RStudio's **Source** button. The
-configuration block near the top of each script contains ordinary R settings:
+Both scripts support `source()` and RStudio's **Source** button. After
+installing the package, run Scenario 1 with:
 
 ```r
-quick_run <- FALSE
-cores <- 20L
-output_directory <- "scenario1-output"
+script <- system.file("reproduce", "scenario1.R", package = "mecCox")
+source(script)
 ```
 
-**These defaults start the full simulation.** To check the installation first,
-open `scenario1.R` and edit its configuration block to:
-
-```r
-quick_run <- TRUE
-cores <- 2L
-output_directory <- "scenario1-quick"
-```
-
-Save the script, then run the whole file with **Source** or this R command:
+For Scenario 2, use `"scenario2.R"` in `system.file()` instead. You can also
+source a script from your local checkout:
 
 ```r
 source("path/to/mecCox/inst/reproduce/scenario1.R")
 ```
 
-For Scenario 2, edit the same settings inside `scenario2.R`, choose an output
-directory such as `"scenario2-quick"`, and source that file instead. An absolute
-path works from any working directory; use forward slashes in R paths on
-Windows. Relative output directories are created under the R session's
-working directory.
+The configuration block near the top of each script contains ordinary R
+settings:
 
-Edit the settings **inside the script** before sourcing it: values assigned
-only in the console are replaced by its configuration block. Command-line
-options remain available with `Rscript` and override the corresponding script
-settings. When running with `source()` or interactively, the script uses its
-configuration block rather than unrelated R session command-line arguments.
-The helper is found from the sourced file's location, the current project, or
-the installed package. If using downloaded copies, keep
-`simulation_helpers.R` beside both scenario scripts.
+```r
+quick_run <- FALSE
+cores <- 20L
+output_directory <- NULL
+```
+
+**These defaults start the full simulation and do not save any files.** The
+summary table opens with `View()` in interactive R or RStudio. The figure is
+drawn on the active graphics device, which is normally the **Plots** pane in
+RStudio. The resulting tables and metadata remain available in the session;
+see [Results in the R session](#results-in-the-r-session) below.
+
+To check the installation first, open the script with `file.edit(script)` and
+edit its configuration block to:
+
+```r
+quick_run <- TRUE
+cores <- 2L
+output_directory <- NULL
+```
+
+Save the script, then run the whole file with **Source** or `source(script)`.
+For Scenario 2, edit the same settings inside `scenario2.R` and source that
+file instead. Edit the settings **inside the script** before sourcing it:
+values assigned only in the console are replaced by its configuration block.
+
+An absolute script path works from any working directory; use forward slashes
+in R paths on Windows. The helper is found from the sourced file's location,
+the current project, or the installed package. If using downloaded copies,
+keep `simulation_helpers.R` beside both scenario scripts.
+
+## Run from a terminal
+
+From the checkout's parent directory:
+
+```sh
+Rscript mecCox/inst/reproduce/scenario1.R
+Rscript mecCox/inst/reproduce/scenario2.R
+```
+
+For short installation and code-path checks:
+
+```sh
+Rscript mecCox/inst/reproduce/scenario1.R --quick --cores=2
+Rscript mecCox/inst/reproduce/scenario2.R --quick --cores=2
+```
+
+Without an interactive graphics window, the scripts print the summary table
+to the console. They do not create output files by default. Command-line
+options override the corresponding script settings. When running with
+`source()` or interactively, the script uses its configuration block rather
+than unrelated R session command-line arguments.
 
 ## Parallel execution
 
@@ -72,12 +90,12 @@ Choose another limit with `--cores=N`, or use `--cores=1` for serial execution
 from a terminal. In R or RStudio, edit `cores` in the script instead:
 
 ```sh
-Rscript mecCox/inst/reproduce/scenario1.R --cores=8 --output=scenario1-output
+Rscript mecCox/inst/reproduce/scenario1.R --cores=8
 ```
 
 The PSOCK backend works on Windows, macOS, and Linux. A worker pool is reused
 across design cells. Only Monte Carlo replications run in parallel; reference
-target computation, checkpoint writing, summaries, and plots run in the main
+target computation, summaries, plots, and optional file writing run in the main
 R process. Each replication receives its own deterministic seed, so changing
 worker count or scheduling preserves its data and fits in the same R and
 package environment.
@@ -169,32 +187,80 @@ draws, 25 burn-in iterations, and 100 RSF trees without tuning. Ten-fold
 cross-fitting and five landmarks are retained. It exercises both MEC-Cox
 variants. Quick-run results cannot establish simulation performance.
 
-## Output and reproducibility
+## Results in the R session
 
-Each output directory contains:
+When sourced, Scenario 1 creates:
 
-- `replications.csv`: one row per replication and method, including a visible
+- `scenario1_replications`: one row per replication and method, with a visible
   error message for any failed fit.
-- `checkpoint_*.csv`: one file written after each completed design
-  cell. These preserve finished cells if a long run is interrupted; the script
-  does not automatically resume from them.
-- `summary.csv`: nominal 95% Wald coverage, Monte Carlo bias and RMSE on the
-  **log-hazard-ratio** scale, with counts of successful and failed fits.
-- `scenario1.pdf` or `scenario2.pdf`: nine panels arranged by cohort-size
-  ratio or nonlinearity setting, respectively, and performance metric.
+- `scenario1_summary`: nominal 95% Wald coverage, Monte Carlo bias and RMSE on
+  the **log-hazard-ratio** scale, and counts of successful and failed fits.
+- `scenario1_results`: a list containing the replication table, summary table,
+  and run metadata, including the design, reference target, quick/full flag,
+  worker counts, and R session.
+
+Scenario 2 creates the corresponding `scenario2_replications`,
+`scenario2_summary`, and `scenario2_results`, plus `scenario2_targets`, which
+contains the reference log-hazard ratio for each nonlinearity setting.
+
+The summary appears in the Data Viewer and the nine-panel figure appears in
+the Plots pane when the script is run in RStudio. You can inspect the tables
+again without rerunning the simulation:
+
+```r
+View(scenario1_summary)
+head(scenario1_replications)
+scenario1_results$metadata
+```
+
+To redraw the figure without refitting, use `plot_scenario1_results(scenario1_summary)`.
+For Scenario 2, use:
+
+```r
+plot_scenario2_results(scenario2_summary, scenario2_results$metadata$settings)
+```
+
+Before interpreting a full run, check the summary's failure counts and inspect
+their messages in the replication table. These scripts do not infer or replace
+missing results when a fit fails.
+
+## Optional saved output
+
+To save a run, change `output_directory` inside the script from `NULL` to a
+folder path, for example:
+
+```r
+output_directory <- "scenario1-output"
+```
+
+Or supply the output directory from a terminal:
+
+```sh
+Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
+Rscript mecCox/inst/reproduce/scenario2.R --output=scenario2-output
+```
+
+Relative output directories are created under the R session's working
+directory. An absolute path selects a specific location. Saving enables:
+
+- `replications.csv`: the replication-level results and any fit errors.
+- `checkpoint_*.csv`: one file written after each completed design cell. These
+  preserve finished cells if a long run is interrupted; the script does not
+  automatically resume from them.
+- `summary.csv`: the summary table described above.
+- `scenario1.pdf` or `scenario2.pdf`: nine panels arranged by cohort-size ratio
+  or nonlinearity setting, respectively, and performance metric.
 - `run_metadata.rds`: design, reference target(s), quick/full flag, requested
   and actual worker counts, and R session.
-- `reference_targets.csv` in Scenario 2: the reference log-hazard ratio for
-  each nonlinearity setting.
+- `reference_targets.csv` in Scenario 2: the reference log-hazard ratio for each
+  nonlinearity setting.
+
+## Reproducibility
 
 The deterministic seeds make each script rerunnable, but the package API,
 learner tuning, and replication streams are not a bit-for-bit replay of the
 earlier private parallel code used to produce the paper's figures. The
 package's corrected ATT-IPW sandwich also differentiates the clipped analysis
-weights locally;
-its values can differ from an earlier correction when fitted probabilities
-cross a clipping boundary. Results should be compared at the Monte Carlo
-level; a quick run cannot establish performance.
-Before interpreting a full run, check `summary.csv` for failures and inspect
-their messages in `replications.csv`. These scripts do not infer or replace
-missing results when a fit fails.
+weights locally; its values can differ from an earlier correction when fitted
+probabilities cross a clipping boundary. Results should be compared at the
+Monte Carlo level; a quick run cannot establish performance.
