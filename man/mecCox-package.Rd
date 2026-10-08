@@ -20,6 +20,14 @@ consistency, positivity, and censoring that package software cannot verify.
 The MEC-Cox stacked sandwich treats fitted nuisance learners as fixed;
 cross-fitting alone does not establish unconditional Wald coverage.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/yain22/mecCox}
+  \item Report bugs at \url{https://github.com/yain22/mecCox/issues}
+}
+
+}
 \author{
 \strong{Maintainer}: Se Yoon Lee \email{seyoonlee.stat.math@gmail.com}
 
