@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="408" viewBox="0 0 360 408" role="img" aria-labelledby="title description">
+  <title id="title">mecCox package logo</title>
+  <desc id="description">Blue and orange survival curves drawing together inside a hexagon.</desc>
+
+  <path d="M180 20 339 112v184l-159 92L21 296V112Z"
+        fill="#fff" stroke="#254f6f" stroke-width="10" stroke-linejoin="round"/>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80 112v126h202" stroke="#c9d3d9" stroke-width="3"/>
+    <path d="M89 128c32 3 59 13 84 36s57 45 102 55"
+          stroke="#254f6f" stroke-width="10"/>
+    <path d="M89 140c34 1 60 12 84 32s57 37 102 43"
+          stroke="#b35446" stroke-width="10"/>
+  </g>
+
+  <text x="180" y="314" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700"
+        letter-spacing="-2"><tspan fill="#254f6f">mec</tspan><tspan fill="#b35446">Cox</tspan></text>
+</svg>
