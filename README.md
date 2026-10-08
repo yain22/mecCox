@@ -72,7 +72,7 @@ predicted_risk_balance(mec, times = c(3, 6, 9, 12, 15))
 The included `example_external_controls` data are entirely simulated. They
 contain no SQUIRE or MSK-CHORD patient records.
 
-## Reproduce the first simulation experiment
+## Reproduce the simulation experiments
 
 The [Scenario 1 script](inst/reproduce/scenario1.R) regenerates the paper's
 linear source-selection and outcome experiment. It compares the three
@@ -81,25 +81,43 @@ ATT-IPW Cox standard errors with GLM/Cox MEC-Cox for each treated sample size
 1:4`. It uses 50 covariates, five event-time-quantile survival landmarks,
 ten-fold cross-fitting, and 1,000 Monte Carlo replications per sample-size
 combination. The output includes the replication-level estimates, a table of
-coverage, bias, and RMSE, and a nine-panel PDF figure. No other simulation
-scenario is included in this reproduction entry point.
+coverage, bias, and RMSE, and a nine-panel PDF figure.
+
+The [Scenario 2 script](inst/reproduce/scenario2.R) evaluates the three
+nonlinearity settings with 10 covariates, a fixed external-control ratio of
+`1:4`, and the same treated sample sizes and replication count. It compares
+the ATT-IPW methods with BART/Cox and BART/RSF MEC-Cox. Install its optional
+learners before running this script:
+
+```r
+install.packages(c("dbarts", "ranger"))
+```
 
 After installing the package, run from the checkout's parent directory:
 
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
+Rscript mecCox/inst/reproduce/scenario2.R --output=scenario2-output
 ```
 
-The full run fits 15,000 simulated datasets and can take substantial time. To
-check that the code and dependencies work before starting it, run:
+Each full run fits 15,000 simulated datasets and can take substantial time.
+Replications run in parallel with up to 20 workers by default, capped by the
+number of detected logical cores and replications. Set `--cores=N` to choose
+a smaller worker count, or `--cores=1` for a serial run. The socket-based
+parallel backend works on Windows, macOS, and Linux. Fixed replication seeds
+preserve results across worker counts in the same R and package environment.
+
+To check that the code and dependencies work before a full run:
 
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --quick --output=scenario1-quick
+Rscript mecCox/inst/reproduce/scenario2.R --quick --output=scenario2-quick
 ```
 
-`--quick` uses two replications, one sample-size combination, and a smaller
-superpopulation reference. Its numerical results are only a code-path check;
-they are not estimates from the paper's simulation. See the
+`--quick` uses two replications per retained design cell, one treated sample
+size, and a smaller superpopulation reference; Scenario 2 also reduces the
+BART and RSF settings and retains all three nonlinearity settings. These runs
+check the code path and are not estimates from the paper's simulation. See the
 [reproduction notes](inst/reproduce/README.md) for the exact generator and
 interpretation of the output.
 
@@ -129,11 +147,11 @@ ml_fit <- fit_mec_cox(
 ```
 
 `ps_learner = "bart"` is also available for nonlinear source-propensity
-estimation, including the class of fits studied in the paper's second
-simulation scenario. BART tree count, posterior draws, burn-in, and shrinkage
-are explicit arguments. The package does not automatically tune BART; users
-who need exact simulation settings should consult the study's simulation
-script and supply its selected hyperparameters.
+estimation, including the fits in the [Scenario 2 reproduction
+script](inst/reproduce/scenario2.R). BART tree count, posterior draws,
+burn-in, and shrinkage are explicit arguments. The package does not
+automatically tune BART; the reproduction script records its settings in the
+run metadata.
 
 MEC-Cox uses positive Kullback–Leibler calibrated weights. The stored
 `basis`, `ps_oof`, `survival_oof`, `base_weights`, and `weights` make its
@@ -173,6 +191,18 @@ R CMD check mecCox_0.1.0.tar.gz --no-manual
 
 The tests compare ATT-IPW output with the manuscript implementation and with
 `survival::coxph`, and verify MEC-Cox balance at its fitted landmarks.
+
+## Reference
+
+Lee, S. Y. (2026). *Balancing Machine-Learned Prognostic Scores to Improve
+Efficiency in ATT Marginal Hazard-Ratio Estimation with
+Inverse-Probability-Weighted Cox Regression*. **Under review.**
+
+To obtain the manuscript reference from R:
+
+```r
+citation("mecCox")
+```
 
 ## License and copyright
 
