@@ -9,6 +9,8 @@ Scenario 2 also requires `dbarts` and `ranger`:
 install.packages(c("dbarts", "ranger"))
 ```
 
+## Run from a terminal
+
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
 Rscript mecCox/inst/reproduce/scenario2.R --output=scenario2-output
@@ -21,9 +23,53 @@ Rscript mecCox/inst/reproduce/scenario1.R --quick --output=scenario1-quick
 Rscript mecCox/inst/reproduce/scenario2.R --quick --output=scenario2-quick
 ```
 
+## Run from R or RStudio
+
+Both scripts also support `source()` and RStudio's **Source** button. The
+configuration block near the top of each script contains ordinary R settings:
+
+```r
+quick_run <- FALSE
+cores <- 20L
+output_directory <- "scenario1-output"
+```
+
+**These defaults start the full simulation.** To check the installation first,
+open `scenario1.R` and edit its configuration block to:
+
+```r
+quick_run <- TRUE
+cores <- 2L
+output_directory <- "scenario1-quick"
+```
+
+Save the script, then run the whole file with **Source** or this R command:
+
+```r
+source("path/to/mecCox/inst/reproduce/scenario1.R")
+```
+
+For Scenario 2, edit the same settings inside `scenario2.R`, choose an output
+directory such as `"scenario2-quick"`, and source that file instead. An absolute
+path works from any working directory; use forward slashes in R paths on
+Windows. Relative output directories are created under the R session's
+working directory.
+
+Edit the settings **inside the script** before sourcing it: values assigned
+only in the console are replaced by its configuration block. Command-line
+options remain available with `Rscript` and override the corresponding script
+settings. When running with `source()` or interactively, the script uses its
+configuration block rather than unrelated R session command-line arguments.
+The helper is found from the sourced file's location, the current project, or
+the installed package. If using downloaded copies, keep
+`simulation_helpers.R` beside both scenario scripts.
+
+## Parallel execution
+
 The scripts request 20 workers by default and cap the actual worker count
 at the number of detected logical cores and replications per design cell.
-Choose another limit with `--cores=N`, or use `--cores=1` for serial execution:
+Choose another limit with `--cores=N`, or use `--cores=1` for serial execution
+from a terminal. In R or RStudio, edit `cores` in the script instead:
 
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --cores=8 --output=scenario1-output

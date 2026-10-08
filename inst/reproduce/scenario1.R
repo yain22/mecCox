@@ -3,14 +3,51 @@
 #   Rscript path/to/mecCox/inst/reproduce/scenario1.R --output=simulation1-output
 # A short code-path check is available with --quick; it is not a paper result.
 # Replications use up to 20 workers by default; use --cores=1 for a serial run.
+# In the R console or RStudio, edit the three settings below, then source this
+# file (or run it from the editor). Rscript arguments override these settings.
 
+quick_run <- FALSE
+cores <- 20L
+output_directory <- "scenario1-output"
+
+# source() records the current file in an `ofile` frame. Selected lines in an
+# editor have no such frame, so also look in the working directory and package.
+source_files <- vapply(sys.frames(), function(frame) {
+  if (is.null(frame$ofile)) "" else as.character(frame$ofile)[1L]
+}, character(1))
+source_files <- rev(source_files[nzchar(source_files)])
 script_option <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
-if (length(script_option) != 1L) {
-  stop("Run this file with Rscript; see inst/reproduce/README.md.", call. = FALSE)
+script_files <- c(source_files, sub("^--file=", "", script_option))
+helper_candidates <- c(
+  file.path(dirname(script_files), "simulation_helpers.R"),
+  "simulation_helpers.R",
+  file.path("inst", "reproduce", "simulation_helpers.R"),
+  file.path("mecCox", "inst", "reproduce", "simulation_helpers.R"),
+  system.file("reproduce", "simulation_helpers.R", package = "mecCox")
+)
+helper_candidates <- unique(helper_candidates[
+  nzchar(helper_candidates) & file.exists(helper_candidates)
+])
+if (!length(helper_candidates)) {
+  stop("Cannot find simulation_helpers.R. Keep it beside scenario1.R and ",
+       "use source('path/to/scenario1.R'), or install the current mecCox package.",
+       call. = FALSE)
 }
-script_path <- normalizePath(sub("^--file=", "", script_option), mustWork = TRUE)
-source(file.path(dirname(script_path), "simulation_helpers.R"), local = TRUE)
-options <- parse_simulation_arguments("scenario1-output")
+source(helper_candidates[1L], local = TRUE)
+
+# A sourced file must not interpret arguments belonging to an outer R script.
+arguments <- if (interactive() || length(source_files)) {
+  character()
+} else {
+  commandArgs(trailingOnly = TRUE)
+}
+if (!any(grepl("^--cores=", arguments))) {
+  arguments <- c(arguments, paste0("--cores=", cores))
+}
+if (quick_run && !"--quick" %in% arguments) {
+  arguments <- c(arguments, "--quick")
+}
+options <- parse_simulation_arguments(output_directory, arguments)
 
 suppressPackageStartupMessages({
   library(mecCox)
