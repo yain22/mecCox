@@ -80,8 +80,8 @@ ATT-IPW Cox standard errors with GLM/Cox MEC-Cox for each treated sample size
 `n1 = 200, 250, 300, 350, 400` and external-control ratio `n1:n0 = 1:2, 1:3,
 1:4`. It uses 50 covariates, five event-time-quantile survival landmarks,
 ten-fold cross-fitting, and 1,000 Monte Carlo replications per sample-size
-combination. The output includes the replication-level estimates, a table of
-coverage, bias, and RMSE, and a nine-panel PDF figure.
+combination. The results include replication-level estimates, a table of
+coverage, bias, and RMSE, and a nine-panel figure.
 
 The [Scenario 2 script](inst/reproduce/scenario2.R) evaluates the three
 nonlinearity settings with 10 covariates, a fixed external-control ratio of
@@ -93,53 +93,65 @@ learners before running this script:
 install.packages(c("dbarts", "ranger"))
 ```
 
-After installing the package, run from the checkout's parent directory:
+Run either script with RStudio's **Source** button, or from the R console:
 
-```sh
-Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
-Rscript mecCox/inst/reproduce/scenario2.R --output=scenario2-output
+```r
+script <- system.file("reproduce", "scenario1.R", package = "mecCox")
+source(script)
 ```
+
+Use `"scenario2.R"` in the same command for Scenario 2. Each script has a
+configuration block near the top:
+
+```r
+quick_run <- FALSE
+cores <- 20L
+output_directory <- NULL
+```
+
+**The default is a full simulation, with no files saved.** In interactive R
+or RStudio, the summary table opens with `View()` and the figure appears on
+the active graphics device (the **Plots** pane in RStudio). The results also
+remain in the R session:
+
+```r
+scenario1_summary       # coverage, bias, RMSE, and fit counts
+scenario1_replications  # individual estimates and standard errors
+scenario1_results       # replications, summary, and run metadata
+```
+
+Scenario 2 creates `scenario2_summary`, `scenario2_replications`,
+`scenario2_results`, and `scenario2_targets`. To run a short check first, open
+the script with `file.edit(script)`, set `quick_run <- TRUE` and `cores <- 2L`
+in its configuration block, save the edit, and source the script. When using
+downloaded copies, keep `simulation_helpers.R` in the same folder.
 
 Each full run fits 15,000 simulated datasets and can take substantial time.
 Replications run in parallel with up to 20 workers by default, capped by the
-number of detected logical cores and replications. Set `--cores=N` to choose
-a smaller worker count, or `--cores=1` for a serial run. The socket-based
+number of detected logical cores and replications. Edit `cores` to choose
+a smaller worker count, or set `cores <- 1L` for a serial run. The socket-based
 parallel backend works on Windows, macOS, and Linux. Fixed replication seeds
 preserve results across worker counts in the same R and package environment.
 
-To check that the code and dependencies work before a full run:
+You can also run the scripts from a terminal:
 
 ```sh
-Rscript mecCox/inst/reproduce/scenario1.R --quick --output=scenario1-quick
-Rscript mecCox/inst/reproduce/scenario2.R --quick --output=scenario2-quick
+Rscript mecCox/inst/reproduce/scenario1.R --quick --cores=2
+Rscript mecCox/inst/reproduce/scenario2.R --quick --cores=2
 ```
 
-`--quick` uses two replications per retained design cell, one treated sample
-size, and a smaller superpopulation reference; Scenario 2 also reduces the
-BART and RSF settings and retains all three nonlinearity settings. These runs
-check the code path and are not estimates from the paper's simulation.
+Without a graphical R session, these commands print the summary table to the
+console. They do not save results by default. Omit `--quick` for a full run.
+The quick run uses two replications per retained design cell, one treated
+sample size, and a smaller superpopulation reference; Scenario 2 also reduces
+the BART and RSF settings and retains all three nonlinearity settings. These
+runs check the code path and are not estimates from the paper's simulation.
 
-You can also run either script with `source()` in the R console or RStudio.
-The configuration block near the top of each script sets `quick_run`, `cores`,
-and `output_directory`. **The default is a full simulation.** For a short
-check, edit that block inside `scenario1.R` to:
-
-```r
-quick_run <- TRUE
-cores <- 2L
-output_directory <- "scenario1-quick"
-```
-
-Then run the whole file with RStudio's **Source** button, or from R:
-
-```r
-source("path/to/mecCox/inst/reproduce/scenario1.R")
-```
-
-For Scenario 2, edit its configuration block and source `scenario2.R` instead.
-When using downloaded scripts, keep `simulation_helpers.R` in the same folder.
-The [reproduction notes](inst/reproduce/README.md) explain both ways to run the
-scripts, the exact generators, and interpretation of the output.
+Saving is optional: set `output_directory <- "scenario1-output"` inside the
+script, or add `--output=scenario1-output` to an `Rscript` command. This writes
+the CSV tables, checkpoints, run metadata, and PDF figure to that directory.
+The [reproduction notes](inst/reproduce/README.md) describe the exact
+generators, output objects, and optional saved files.
 
 ## Methods and interpretation
 
