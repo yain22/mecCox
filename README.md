@@ -66,6 +66,37 @@ predicted_risk_balance(mec, times = c(3, 6, 9, 12, 15))
 The included `example_external_controls` data are entirely simulated. They
 contain no SQUIRE or MSK-CHORD patient records.
 
+## Reproduce the first simulation experiment
+
+The [Scenario 1 script](inst/reproduce/scenario1.R) regenerates the paper's
+linear source-selection and outcome experiment. It compares the three
+ATT-IPW Cox standard errors with GLM/Cox MEC-Cox for each treated sample size
+`n1 = 200, 250, 300, 350, 400` and external-control ratio `n1:n0 = 1:2, 1:3,
+1:4`. It uses 50 covariates, five event-time-quantile survival landmarks,
+ten-fold cross-fitting, and 1,000 Monte Carlo replications per sample-size
+combination. The output includes the replication-level estimates, a table of
+coverage, bias, and RMSE, and a nine-panel PDF figure. No other simulation
+scenario is included in this reproduction entry point.
+
+After installing the package, run from the checkout's parent directory:
+
+```sh
+Rscript mecCox/inst/reproduce/scenario1.R --output=scenario1-output
+```
+
+The full run fits 15,000 simulated datasets and can take substantial time. To
+check that the code and dependencies work before starting it, run:
+
+```sh
+Rscript mecCox/inst/reproduce/scenario1.R --quick --output=scenario1-quick
+```
+
+`--quick` uses two replications, one sample-size combination, and a smaller
+superpopulation reference. Its numerical results are only a code-path check;
+they are not estimates from the paper's simulation. See the
+[reproduction notes](inst/reproduce/README.md) for the exact generator and
+interpretation of the output.
+
 ## Methods and interpretation
 
 `fit_att_ipw_cox()` fits a logistic source-propensity model, clips fitted

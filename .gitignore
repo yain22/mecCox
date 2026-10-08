@@ -5,4 +5,6 @@
 .RData
 *.tar.gz
 *.zip
+/scenario1-output/
+/scenario1-quick/
 inst/doc/
