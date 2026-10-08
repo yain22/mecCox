@@ -1,4 +1,10 @@
+<img src="man/figures/logo.svg" align="right" alt="mecCox hex logo" width="120" />
+
 # mecCox
+
+[![R package](https://img.shields.io/badge/R-%3E%3D%204.2.0-276DC3?logo=r&logoColor=white)](DESCRIPTION)
+[![R package check](https://github.com/yain22/mecCox/actions/workflows/R-CMD-check.yaml/badge.svg?branch=main)](https://github.com/yain22/mecCox/actions/workflows/R-CMD-check.yaml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 
 `mecCox` implements the Cox comparisons and prognostic weight calibration used
 in **Balancing Machine-Learned Prognostic Scores to Improve Efficiency in ATT
@@ -167,3 +173,7 @@ R CMD check mecCox_0.1.0.tar.gz --no-manual
 
 The tests compare ATT-IPW output with the manuscript implementation and with
 `survival::coxph`, and verify MEC-Cox balance at its fitted landmarks.
+
+## License and copyright
+
+Copyright © 2026 Se Yoon Lee. Released under the [MIT License](LICENSE.md).
