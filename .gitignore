@@ -5,6 +5,7 @@
 .RData
 *.tar.gz
 *.zip
+!/inst/reproduce/SQUIRE_Section6_encrypted.zip
 /scenario1-output/
 /scenario1-quick/
 inst/doc/
