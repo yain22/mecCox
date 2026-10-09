@@ -1,16 +1,53 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="360" height="408" viewBox="0 0 360 408" role="img" aria-labelledby="title description">
   <title id="title">mecCox package logo</title>
-  <desc id="description">Blue and orange survival curves drawing together inside a hexagon.</desc>
+  <desc id="description">A causal diagram inside a navy hexagon. Baseline covariates X point to cohort membership A and potential outcomes T1 and T0; dashed arrows connect these to the observed outcome T. The package name mecCox appears below.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse"
+            orient="auto">
+      <path d="M0 0 10 5 0 10 3 5Z" fill="#254f6f"/>
+    </marker>
+    <marker id="selection-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse"
+            orient="auto">
+      <path d="M0 0 10 5 0 10 3 5Z" fill="#a1adb6"/>
+    </marker>
+  </defs>
 
   <path d="M180 20 339 112v184l-159 92L21 296V112Z"
         fill="#fff" stroke="#254f6f" stroke-width="10" stroke-linejoin="round"/>
 
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M80 112v126h202" stroke="#c9d3d9" stroke-width="3"/>
-    <path d="M89 128c32 3 59 13 84 36s57 45 102 55"
-          stroke="#254f6f" stroke-width="10"/>
-    <path d="M89 140c34 1 60 12 84 32s57 37 102 43"
-          stroke="#b35446" stroke-width="10"/>
+  <g fill="none" stroke="#254f6f" stroke-width="3"
+     stroke-linecap="round" marker-end="url(#arrow)">
+    <path d="M97 165 166 123"/>
+    <path d="M101 176H161"/>
+    <path d="M97 187 161 227"/>
+  </g>
+
+  <g fill="none" stroke="#a1adb6" stroke-width="2.7"
+     stroke-dasharray="7 6" stroke-linecap="round"
+     marker-end="url(#selection-arrow)">
+    <path d="M205 112Q253 117 275 156"/>
+    <path d="M206 176H264"/>
+    <path d="M206 240Q253 235 275 196"/>
+  </g>
+
+  <g fill="#fff" stroke="#254f6f" stroke-width="3">
+    <circle cx="80" cy="176" r="21"/>
+    <circle cx="184" cy="112" r="21"/>
+    <rect x="162" y="155" width="44" height="42" rx="9"/>
+    <rect x="162" y="219" width="44" height="42" rx="9"/>
+    <circle cx="286" cy="176" r="21"/>
+  </g>
+
+  <g fill="#254f6f" text-anchor="middle"
+     font-family="Times New Roman, Times, serif" font-size="28" font-style="italic">
+    <text x="80" y="186">X</text>
+    <text x="184" y="122">A</text>
+    <text x="183" y="186">T<tspan dy="-11" font-size="17" font-style="normal">1</tspan></text>
+    <text x="183" y="250">T<tspan dy="-11" font-size="17" font-style="normal">0</tspan></text>
+    <text x="286" y="186">T</text>
   </g>
 
   <text x="180" y="314" text-anchor="middle"

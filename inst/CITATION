@@ -8,6 +8,56 @@ bibentry(
   author = person(given = c("Se", "Yoon"), family = "Lee"),
   year = "2026",
   note = "Manuscript under review.",
-  header = "To cite the manuscript describing mecCox, use:",
+  header = paste(
+    "To cite mecCox, use the manuscript below;",
+    "cite the methodological references as applicable."
+  ),
   key = "Lee2026mecCox"
+)
+
+bibentry(
+  bibtype = "Article",
+  title = "Variance estimation in inverse probability weighted {Cox} models",
+  author = c(
+    person(given = "Di", family = "Shu"),
+    person(given = c("Jessica", "G."), family = "Young"),
+    person(given = "Sengwee", family = "Toh"),
+    person(given = "Rui", family = "Wang")
+  ),
+  journal = "Biometrics",
+  year = "2021",
+  volume = "77",
+  number = "3",
+  pages = "1101--1117",
+  doi = "10.1111/biom.13332",
+  key = "Shu2021IPWCox"
+)
+
+bibentry(
+  bibtype = "Article",
+  title = "Fitting {Cox}'s proportional hazards models from survey data",
+  author = person(given = c("David", "A."), family = "Binder"),
+  journal = "Biometrika",
+  year = "1992",
+  volume = "79",
+  number = "1",
+  pages = "139--147",
+  doi = "10.1093/biomet/79.1.139",
+  key = "Binder1992WeightedCox"
+)
+
+bibentry(
+  bibtype = "Article",
+  title = "The robust inference for the {Cox} proportional hazards model",
+  author = c(
+    person(given = c("D.", "Y."), family = "Lin"),
+    person(given = c("L.", "J."), family = "Wei")
+  ),
+  journal = "Journal of the American Statistical Association",
+  year = "1989",
+  volume = "84",
+  number = "408",
+  pages = "1074--1078",
+  doi = "10.1080/01621459.1989.10478874",
+  key = "LinWei1989RobustCox"
 )

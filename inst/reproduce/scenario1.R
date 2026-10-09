@@ -1,8 +1,8 @@
-# Reproduce the paper's first simulation experiment with the public mecCox API.
+# Run the paper's first simulation experiment with the public mecCox API.
 # Run from any directory after installing mecCox:
 #   Rscript path/to/mecCox/inst/reproduce/scenario1.R
 # A short code-path check is available with --quick; it is not a paper result.
-# Replications use up to 20 workers by default; use --cores=1 for a serial run.
+# Simulation runs use up to 20 workers by default; use --cores=1 for a serial run.
 # In the R console or RStudio, edit the three settings below, then source this
 # file (or run it from the editor). Rscript arguments override these settings.
 # Results stay in R, with formatted tables in the RStudio Viewer and plots in
@@ -317,7 +317,7 @@ run_scenario1 <- function(design, options) {
   cell_index <- 0L
   for (multiplier in design$control_multipliers) {
     for (treated_count in design$treated_sizes) {
-      message(sprintf("Running n1=%d, n0=%d (%d replications)",
+      message(sprintf("Running n1=%d, n0=%d (%d runs)",
                       treated_count, multiplier * treated_count,
                       design$replications))
       cell_rows <- run_simulation_replications(
@@ -338,7 +338,7 @@ run_scenario1 <- function(design, options) {
 
   print(summary, row.names = FALSE, digits = 4)
   if (any(summary$failed > 0L)) {
-    warning("Some fits failed; inspect the error column in the replication results.",
+    warning("Some fits failed; inspect the error column in the individual simulation results.",
             call. = FALSE)
   }
   invisible(list(replications = results, summary = summary, metadata = metadata))
@@ -348,7 +348,7 @@ scenario1_results <- run_scenario1(design, options)
 scenario1_summary <- scenario1_results$summary
 scenario1_replications <- scenario1_results$replications
 
-# Keep every replication in R; display the complete aggregated results.
+# Keep every run in R; display the complete aggregated results.
 scenario1_display <- build_simulation_report(scenario1_results, "Scenario 1")
 scenario1_tables <- scenario1_display$tables
 scenario1_report <- scenario1_display$report

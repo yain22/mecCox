@@ -1,4 +1,4 @@
-# Execution helpers shared by the two simulation reproduction scripts.
+# Execution helpers shared by the two simulation scripts.
 # The scientific generators and fitting calls remain in each scenario script.
 
 parse_simulation_arguments <- function(arguments = character(),
@@ -94,7 +94,7 @@ start_simulation_cluster <- function(worker_count, export_names,
 run_simulation_replications <- function(replications, replication_function,
                                         arguments, cluster = NULL) {
   # Each scenario sets a seed inside replication_function from the cell and
-  # replication indices. Random numbers therefore do not depend on the worker
+  # run indices. Random numbers therefore do not depend on the worker
   # that receives a task, even with load-balanced scheduling.
   run_one <- function(replicate, replication_function, arguments) {
     do.call(replication_function, c(arguments, list(replicate = replicate)))
@@ -195,7 +195,7 @@ build_simulation_report <- function(results, title) {
     htmltools::tags$h1(title),
     htmltools::tags$p(
       "The complete aggregated results are shown below. Individual ",
-      "replication records remain available in the R session."
+      "individual simulation results remain available in the R session."
     ),
     content
   ))

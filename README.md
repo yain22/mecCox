@@ -72,20 +72,36 @@ predicted_risk_balance(mec, times = c(3, 6, 9, 12, 15))
 The included `example_external_controls` data are entirely simulated. They
 contain no SQUIRE or MSK-CHORD patient records.
 
-## Reproduce the simulation experiments
+## Run the simulations and public case study
 
-The [Scenario 1 script](inst/reproduce/scenario1.R) regenerates the paper's
+The repository provides runnable code for two simulation experiments and
+one public-data case study:
+
+| Study | Script | Results |
+| --- | --- | --- |
+| Simulation 1: linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
+| Simulation 2: increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
+| Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S2 and S3 |
+
+The breast-cancer example uses the public `gbsg` and `rotterdam` datasets
+distributed with the R package `survival`. These data are available to anyone
+who installs that package. The separate SQUIRE/MSK-CHORD application uses
+restricted patient data, which are not distributed here.
+
+### Simulation experiments
+
+The [Scenario 1 script](inst/reproduce/scenario1.R) runs the paper's
 linear source-selection and outcome experiment. It compares the three
 ATT-IPW Cox standard errors with GLM/Cox MEC-Cox for each treated sample size
 `n1 = 200, 250, 300, 350, 400` and external-control ratio `n1:n0 = 1:2, 1:3,
 1:4`. It uses 50 covariates, five event-time-quantile survival landmarks,
-ten-fold cross-fitting, and 1,000 Monte Carlo replications per sample-size
-combination. The results include replication-level estimates, a table of
+ten-fold cross-fitting, and 1,000 Monte Carlo runs per sample-size
+combination. The results include estimates from individual runs, a table of
 coverage, bias, and RMSE, and a nine-panel figure.
 
 The [Scenario 2 script](inst/reproduce/scenario2.R) evaluates the three
 nonlinearity settings with 10 covariates, a fixed external-control ratio of
-`1:4`, and the same treated sample sizes and replication count. It compares
+`1:4`, and the same treated sample sizes and number of runs. It compares
 the ATT-IPW methods with BART/Cox and BART/RSF MEC-Cox. Install its optional
 learners before running this script:
 
@@ -115,7 +131,7 @@ cores <- 20L
 replications <- 1000L
 ```
 
-Edit `replications` to choose the number of Monte Carlo replications per
+Edit `replications` to choose the number of Monte Carlo runs per
 design cell, and edit `cores` to choose the maximum number of workers.
 **The scripts display results and keep them in memory; they do not export
 result files.** In RStudio, a formatted HTML report opens in the **Viewer**
@@ -126,26 +142,26 @@ settings. The figure appears on the active graphics device, normally the
 ```r
 scenario1_summary       # coverage, bias, RMSE, and fit counts
 scenario1_replications  # individual estimates and standard errors
-scenario1_results       # replications, summary, and run metadata
+scenario1_results       # individual runs, summary, and run metadata
 scenario1_tables        # named list of formatted HTML tables
 scenario1_report        # HTML report shown in the Viewer
 ```
 
 Scenario 2 creates `scenario2_summary`, `scenario2_replications`,
 `scenario2_results`, `scenario2_targets`, `scenario2_tables`, and
-`scenario2_report`. Individual replication rows remain available in R; the
+`scenario2_report`. Individual simulation rows remain available in R; the
 Viewer report presents the aggregated results rather than thousands of raw
 rows. To run a short check first, open the script with `file.edit(script)`,
 set `quick_run <- TRUE`, `cores <- 2L`, and `replications <- 2L` in its
 configuration block, then source the edited script. When using downloaded
 copies, keep `simulation_helpers.R` in the same folder.
 
-At the default 1,000 replications, each full run fits 15,000 simulated
+At the default 1,000 runs per design cell, each full study fits 15,000 simulated
 datasets and can take substantial time.
-Replications run in parallel with up to 20 workers by default, capped by the
-number of detected logical cores and replications. Edit `cores` to choose
+Simulation runs use up to 20 parallel workers by default, capped by the
+number of detected logical cores and runs. Edit `cores` to choose
 a smaller worker count, or set `cores <- 1L` for a serial run. The socket-based
-parallel backend works on Windows, macOS, and Linux. Fixed replication seeds
+parallel backend works on Windows, macOS, and Linux. Fixed simulation seeds
 preserve results across worker counts in the same R and package environment.
 
 You can also run the scripts from a terminal:
@@ -158,17 +174,52 @@ Rscript mecCox/inst/reproduce/scenario1.R --cores=20 --replications=100
 
 Without a graphical R session, the scripts print their tables to the console;
 run them in RStudio to display the HTML report and plots. Command-line
-`--replications=N` must be a positive integer and overrides the replication
-setting in the script. The quick run defaults to two replications per
-retained design cell when the replication setting remains at 1,000 and no
+`--replications=N` must be a positive integer and overrides the number of runs
+configured in the script. The quick check defaults to two runs per
+retained design cell when the configured count remains at 1,000 and no
 count is supplied on the command line. A nondefault configured count or an
 explicit `--replications` count is retained. Quick mode uses one treated
 sample size and a smaller superpopulation reference; Scenario 2 also reduces
 the BART and RSF settings and retains all three nonlinearity settings. These
 runs check the code path and are not estimates from the paper's simulation.
 
-The [reproduction notes](inst/reproduce/README.md) describe the exact
+The [running instructions](inst/reproduce/README.md) describe the
 generators, in-memory objects, and display options.
+
+### Public breast-cancer case study
+
+The [breast-cancer script](inst/reproduce/breast_cancer.R) constructs the
+GBSG hormonal-therapy target cohort and the Rotterdam external-control
+cohort without hormonal therapy. It harmonizes recurrence-free survival
+with administrative censoring at five years, then compares unweighted Cox,
+ATT-IPW Cox, and MEC-Cox with GLM/Cox and DL/RSF learners. The ATT-IPW rows
+report naive, robust sandwich, and corrected sandwich uncertainty estimates
+for the same weighted Cox coefficient.
+
+Install the display packages and optional learners, then run the script in
+RStudio:
+
+```r
+install.packages(c("kableExtra", "htmltools", "rstudioapi", "brulee", "torch", "ranger"))
+# If the Torch runtime is not already installed:
+torch::install_torch()
+
+script <- system.file("reproduce", "breast_cancer.R", package = "mecCox")
+source(script)
+```
+
+The two `kableExtra` tables open together in the **Viewer** pane; results
+remain in memory, with no result-file exports. The first table reports
+log-hazard ratios, standard errors, hazard ratios, and 95% confidence
+intervals. The second reports covariate balance and external-control weight
+diagnostics. The script generates these analyses in the format of
+supplementary Tables S2 and S3; numerical results may vary with random seeds,
+learner settings, and software versions.
+
+The R session retains `breast_cancer_estimates`, `breast_cancer_balance`,
+`breast_cancer_results`, `breast_cancer_tables`, and `breast_cancer_report`.
+See the [case-study instructions](inst/reproduce/README.md#public-breast-cancer-case-study)
+for cohort construction and interpretation.
 
 ## Methods and interpretation
 
@@ -181,6 +232,12 @@ logistic propensity scores. When clipping is active, the corrected sandwich
 uses the fitted logistic probabilities for the logistic score and locally
 differentiates the clipped weights used by Cox; interpretation close to a
 clipping boundary needs care.
+
+The robust sandwich builds on [Lin and Wei (1989)](https://doi.org/10.1080/01621459.1989.10478874)
+and the weighted Cox extension of [Binder (1992)](https://doi.org/10.1093/biomet/79.1.139).
+The corrected sandwich follows the stacked-estimating-equation approach to
+IPW Cox variance estimation of [Shu, Young, Toh, and Wang (2021)](https://doi.org/10.1111/biom.13332),
+applied here to normalized ATT odds.
 
 `fit_mec_cox()` cross-fits both nuisance learners. Its default GLM/Cox fit uses
 out-of-fold logistic source probabilities and Cox-predicted control survival.
@@ -196,10 +253,10 @@ ml_fit <- fit_mec_cox(
 ```
 
 `ps_learner = "bart"` is also available for nonlinear source-propensity
-estimation, including the fits in the [Scenario 2 reproduction
+estimation, including the fits in the [Scenario 2 study
 script](inst/reproduce/scenario2.R). BART tree count, posterior draws,
 burn-in, and shrinkage are explicit arguments. The package does not
-automatically tune BART; the reproduction script records its settings in the
+automatically tune BART; the study script records its settings in the
 run metadata.
 
 MEC-Cox uses positive Kullback–Leibler calibrated weights. The stored
@@ -241,13 +298,25 @@ R CMD check mecCox_0.1.0.tar.gz --no-manual
 The tests compare ATT-IPW output with the manuscript implementation and with
 `survival::coxph`, and verify MEC-Cox balance at its fitted landmarks.
 
-## Reference
+## References
 
 Lee, S. Y. (2026). *Balancing Machine-Learned Prognostic Scores to Improve
 Efficiency in ATT Marginal Hazard-Ratio Estimation with
 Inverse-Probability-Weighted Cox Regression*. **Under review.**
 
-To obtain the manuscript reference from R:
+Shu, D., Young, J. G., Toh, S., & Wang, R. (2021).
+[Variance estimation in inverse probability weighted Cox models](https://doi.org/10.1111/biom.13332).
+*Biometrics*, **77**(3), 1101–1117.
+
+Binder, D. A. (1992).
+[Fitting Cox's proportional hazards models from survey data](https://doi.org/10.1093/biomet/79.1.139).
+*Biometrika*, **79**(1), 139–147.
+
+Lin, D. Y., & Wei, L. J. (1989).
+[The robust inference for the Cox proportional hazards model](https://doi.org/10.1080/01621459.1989.10478874).
+*Journal of the American Statistical Association*, **84**(408), 1074–1078.
+
+To obtain the manuscript and methodological references from R:
 
 ```r
 citation("mecCox")

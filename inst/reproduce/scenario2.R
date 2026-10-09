@@ -1,4 +1,4 @@
-# Reproduce the second simulation experiment with the public mecCox API.
+# Run the second simulation experiment with the public mecCox API.
 # Run after installing mecCox, dbarts, and ranger:
 #   Rscript path/to/mecCox/inst/reproduce/scenario2.R
 # The default is up to 20 workers; --cores=1 runs sequentially.
@@ -249,7 +249,7 @@ make_result <- function(setting, treated_count, replicate, method, target,
 }
 
 run_replication <- function(setting, treated_count, replicate, target, design) {
-  # A replication owns its seed, independently of worker count and scheduling.
+  # Each run owns its seed, independently of worker count and scheduling.
   replicate_seed <- design$seed + 100000L * setting$setting_id +
     100L * treated_count + replicate
   set.seed(replicate_seed)
@@ -386,7 +386,7 @@ run_scenario2 <- function(design, settings, options) {
     target <- targets$target[setting_index]
     for (treated_count in design$treated_sizes) {
       control_count <- design$control_multiplier * treated_count
-      message(sprintf("Running %s: n1=%d, n0=%d (%d replications)",
+      message(sprintf("Running %s: n1=%d, n0=%d (%d runs)",
                       setting$setting, treated_count, control_count,
                       design$replications))
       cell_rows <- run_simulation_replications(
@@ -406,7 +406,7 @@ run_scenario2 <- function(design, settings, options) {
   summary <- summarize_scenario2_results(results, settings)
   print(summary, row.names = FALSE, digits = 4)
   if (any(summary$failed > 0L)) {
-    warning("Some fits failed; inspect the error column in the replication results.",
+    warning("Some fits failed; inspect the error column in the individual simulation results.",
             call. = FALSE)
   }
   invisible(list(replications = results, summary = summary,
@@ -418,7 +418,7 @@ scenario2_summary <- scenario2_results$summary
 scenario2_replications <- scenario2_results$replications
 scenario2_targets <- scenario2_results$targets
 
-# Keep every replication in R; display the complete aggregated results.
+# Keep every run in R; display the complete aggregated results.
 scenario2_display <- build_simulation_report(scenario2_results, "Scenario 2")
 scenario2_tables <- scenario2_display$tables
 scenario2_report <- scenario2_display$report

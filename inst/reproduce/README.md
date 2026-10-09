@@ -1,4 +1,21 @@
-# Simulation experiments
+# Run the simulations and public breast-cancer case study
+
+This directory contains runnable code for three analyses:
+
+| Analysis | Script | Output |
+| --- | --- | --- |
+| Simulation 1 | [scenario1.R](scenario1.R) | Simulation summary and figure |
+| Simulation 2 | [scenario2.R](scenario2.R) | Simulation summary and figure |
+| Public breast-cancer case study | [breast_cancer.R](breast_cancer.R) | Two analysis tables in the format of supplementary Tables S2 and S3 |
+
+The breast-cancer data are public datasets included in `survival`; they are
+not subject to the restrictions of the separate SQUIRE/MSK-CHORD application.
+No restricted patient records are included in these examples. All three
+scripts display results and retain R objects without exporting result files.
+The [case-study instructions](#public-breast-cancer-case-study) appear below
+the simulation instructions.
+
+## Simulation dependencies
 
 `scenario1.R` and `scenario2.R` rerun the two main-paper simulation designs
 with the exported `mecCox` fitting functions. Install the package first, for
@@ -12,9 +29,9 @@ install.packages(c("kableExtra", "htmltools", "rstudioapi"))
 install.packages(c("dbarts", "ranger"))
 ```
 
-## Run from R or RStudio
+## Run simulations from R or RStudio
 
-Both scripts support `source()` and RStudio's **Source** button. After
+Both simulation scripts support `source()` and RStudio's **Source** button. After
 installing the package, run Scenario 1 with:
 
 ```r
@@ -38,7 +55,7 @@ cores <- 20L
 replications <- 1000L
 ```
 
-Edit `replications` to choose the number of Monte Carlo replications per
+Edit `replications` to choose the number of Monte Carlo runs per
 design cell. The default is 1,000, matching the full simulation design.
 Edit `cores` to choose the maximum worker count.
 
@@ -68,7 +85,7 @@ in R paths on Windows. The helper is found from the sourced file's location,
 the current project, or the installed package. If using downloaded copies,
 keep `simulation_helpers.R` beside both scenario scripts.
 
-## Run from a terminal
+## Run simulations from a terminal
 
 From the checkout's parent directory:
 
@@ -84,7 +101,7 @@ Rscript mecCox/inst/reproduce/scenario1.R --quick --cores=2
 Rscript mecCox/inst/reproduce/scenario2.R --quick --cores=2
 ```
 
-To choose a replication count explicitly:
+To choose the number of runs explicitly:
 
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --cores=20 --replications=100
@@ -102,10 +119,10 @@ override the corresponding script settings. When running with
 `source()` or interactively, the script uses its configuration block rather
 than unrelated R session command-line arguments.
 
-## Parallel execution
+## Parallel simulation execution
 
 The scripts request 20 workers by default and cap the actual worker count
-at the number of detected logical cores and replications per design cell.
+at the number of detected logical cores and runs per design cell.
 Choose another limit with `--cores=N`, or use `--cores=1` for serial execution
 from a terminal. In R or RStudio, edit `cores` in the script instead:
 
@@ -114,15 +131,15 @@ Rscript mecCox/inst/reproduce/scenario1.R --cores=8
 ```
 
 The PSOCK backend works on Windows, macOS, and Linux. A worker pool is reused
-across design cells. Only Monte Carlo replications run in parallel; reference
+across design cells. Only Monte Carlo runs execute in parallel; reference
 target computation, summaries, HTML tables, and plots run in the main R
-process. Each replication receives its own deterministic seed, so changing
+process. Each run receives its own deterministic seed, so changing
 worker count or scheduling preserves its data and fits in the same R and
 package environment.
 
 ## Scenario 1: linear source selection and prognosis
 
-At the default replication setting, the full run has 1,000 replications at
+At the default setting, the full study has 1,000 Monte Carlo runs at
 each of 15 combinations of
 `n1 = 200, 250, 300, 350, 400` and `n0/n1 = 2, 3, 4`. The source and outcome
 models have 50 independent standard-normal covariates. The first five affect
@@ -155,15 +172,15 @@ clipped to `[0.01, 0.99]` when constructing analysis weights. Both methods
 use a Breslow weighted Cox fit.
 
 The short `--quick` run retains `n1 = 200` and `n0/n1 = 2`, with two
-replications unless a different count is selected, and a reference population
+runs unless a different count is selected, and a reference population
 of 2,000 treated and 4,000 external controls. It retains all 50 covariates,
 ten folds, and five landmarks.
 
 ## Scenario 2: increasing nonlinearity
 
 The full run uses 10 independent standard-normal covariates, the same five
-treated sample sizes, and `n0/n1 = 4`. At the default replication setting, it
-has 1,000 replications at each of 15 sample-size and nonlinearity combinations:
+treated sample sizes, and `n0/n1 = 4`. At the default setting, it
+has 1,000 Monte Carlo runs at each of 15 sample-size and nonlinearity combinations:
 
 | Setting | Source-selection multiplier `kappa_pi` | Prognostic multiplier `kappa_m` |
 | --- | ---: | ---: |
@@ -197,28 +214,107 @@ the fallback minimum node size is 15.
 The two MEC-Cox variants use the same BART settings, folds, and seeds, so
 their source-propensity predictions agree. The script and metadata record
 the learner settings.
-The reproduction script fixes these BART settings, while the original study
-code tuned BART within training folds. It reproduces the study design with
+The study script fixes these BART settings, while the original study
+code tuned BART within training folds. It runs the study design with
 the public API; its fitting sequence and numerical results can differ from
 those underlying the paper's figure.
 
 The short `--quick` run keeps all three nonlinearity settings, but uses
-`n1 = 200`, two replications per setting unless a different count is selected,
+`n1 = 200`, two runs per setting unless a different count is selected,
 and reference populations of 2,000 treated and 4,000 external controls.
 It uses 25 BART trees, 50 posterior
 draws, 25 burn-in iterations, and 100 RSF trees without tuning. Ten-fold
 cross-fitting and five landmarks are retained. It exercises both MEC-Cox
 variants. Quick-run results cannot establish simulation performance.
 
+## Public breast-cancer case study
+
+`breast_cancer.R` uses the public `gbsg` and `rotterdam` datasets shipped
+with `survival`. It loads them directly from the installed package; no
+private data file or access request is needed. The target cohort comprises
+GBSG patients who received hormonal therapy, and the external-control
+cohort comprises Rotterdam patients who did not receive hormonal therapy.
+The endpoint is recurrence-free survival administratively censored at five
+years. Rotterdam recurrence and death records are combined to harmonize
+the endpoint with the GBSG data.
+
+The analysis uses age, menopausal status, tumor-size category, tumor grade,
+and `log(1 + x)` transformations of positive-node count, progesterone
+receptor level, and estrogen receptor level. It compares unweighted Cox,
+ATT-IPW Cox with three standard errors for the same point estimate, and
+MEC-Cox with GLM/Cox and DL/RSF learners. The MEC-Cox fits use ten-fold
+cross-fitting and 20 survival landmarks.
+
+Install the display packages and the optional DL/RSF dependencies:
+
+```r
+install.packages(c("kableExtra", "htmltools", "rstudioapi", "brulee", "torch", "ranger"))
+# If the Torch runtime is not already installed:
+torch::install_torch()
+```
+
+Run the script with RStudio's **Source** button or from the console:
+
+```r
+script <- system.file("reproduce", "breast_cancer.R", package = "mecCox")
+source(script)
+```
+
+For a local checkout, use
+`source("path/to/mecCox/inst/reproduce/breast_cancer.R")`. Keep
+`breast_cancer_helpers.R` and `simulation_helpers.R` beside the script when
+downloading individual files.
+The two tables open together as `kableExtra` HTML tables in the RStudio
+**Viewer**. They present the supplementary breast-cancer analyses:
+
+- **Table S2 format:** log-hazard-ratio estimates, standard errors, hazard
+  ratios, and 95% confidence intervals for all six method/variance combinations.
+- **Table S3 format:** covariate differences before and after weighting,
+  mean and maximum absolute balance differences, counts exceeding 0.10,
+  effective sample size, and the coefficient of variation of external-control weights.
+
+Continuous covariates are standardized using the target-cohort standard
+deviation. Binary covariates use differences in proportions, matching the
+supplement's reporting convention. The unweighted estimate is a
+descriptive comparison; interpretation of weighted estimates depends on the
+study's identifying assumptions.
+
+The sidecar `breast_cancer_helpers.R` preserves the original case-study
+model conventions. Grade 1 occurs in 33 treated patients and no external
+controls, so weighting cannot remove that category's imbalance. The control
+Cox fit retains the original factor coding and permits an aliased coefficient
+(set to zero for prediction); prognosis for the unsupported grade therefore
+depends on an extrapolation convention. The RSF uses the same factor levels.
+The general `fit_mec_cox()` interface keeps its stricter support checks.
+The Rotterdam endpoint also retains the original convention of counting the
+first recorded recurrence or death and using the later follow-up time when
+neither occurred; see the [dataset documentation](https://stat.ethz.ch/R-manual/R-devel/library/survival/html/rotterdam.html)
+for the issue of deaths recorded after recurrence follow-up ended.
+
+The script creates no result exports. Its objects remain available in R:
+
+```r
+breast_cancer_estimates   # Table S2 format: estimates and uncertainty
+breast_cancer_balance     # Table S3 format: balance and weight diagnostics
+breast_cancer_results     # analysis results and metadata
+breast_cancer_tables      # formatted HTML tables
+breast_cancer_report      # report displayed in the Viewer
+```
+
+From a terminal, use `Rscript mecCox/inst/reproduce/breast_cancer.R`.
+Tables print to the console when no RStudio Viewer is available. Numerical
+results may vary from the manuscript tables with random seeds, learner
+settings, and software versions.
+
 ## Results in the R session
 
 When sourced, Scenario 1 creates:
 
-- `scenario1_replications`: one row per replication and method, with a visible
+- `scenario1_replications`: one row per run and method, with a visible
   error message for any failed fit.
 - `scenario1_summary`: nominal 95% Wald coverage, Monte Carlo bias and RMSE on
   the **log-hazard-ratio** scale, and counts of successful and failed fits.
-- `scenario1_results`: a list containing the replication table, summary table,
+- `scenario1_results`: a list containing the table of individual runs, summary table,
   and run metadata, including the design, reference target, quick/full flag,
   worker counts, and R session.
 - `scenario1_tables`: a named list of formatted HTML summary, reference-target,
@@ -231,7 +327,7 @@ Scenario 2 creates the corresponding `scenario2_replications`,
 log-hazard ratio for each nonlinearity setting.
 
 The HTML report includes all design cells, methods, performance metrics, and
-failure counts in the aggregated summary. Individual replication rows remain
+failure counts in the aggregated summary. Individual simulation rows remain
 in memory rather than being added to a very large Viewer report. You can
 inspect the underlying objects without rerunning the simulation:
 
@@ -250,13 +346,13 @@ plot_scenario2_results(scenario2_summary, scenario2_results$metadata$settings)
 ```
 
 Before interpreting a full run, check the summary's failure counts and inspect
-their messages in the replication table. These scripts do not infer or replace
+their messages in the table of individual runs. These scripts do not infer or replace
 missing results when a fit fails.
 
-## Reproducibility
+## Numerical results
 
 The deterministic seeds make each script rerunnable, but the package API,
-learner tuning, and replication streams are not a bit-for-bit replay of the
+learner tuning, and random-number streams are not a bit-for-bit replay of the
 earlier private parallel code used to produce the paper's figures. The
 package's corrected ATT-IPW sandwich also differentiates the clipped analysis
 weights locally; its values can differ from an earlier correction when fitted
