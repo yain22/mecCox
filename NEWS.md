@@ -1,3 +1,15 @@
+# mecCox 0.1.1
+
+- Restored Scenario 2's original small-subset BART tuning and randomized
+  survival-forest settings. The general fitting API retains its existing
+  defaults; `nuisance_settings = "original_study"` selects the study preset.
+- Reuse cross-fitted propensity predictions between the two Scenario 2 fits,
+  and omit unused learner predictions and derivative influence calculations.
+- Report Scenario 2 progress within cells and retain completed datasets in
+  memory after interruption, with explicit partial-result status.
+- Resolve breast-cancer helper files from saved scripts, RStudio documents,
+  project folders, or the installed package, with an explicit directory option.
+
 # mecCox 0.1.0
 
 - Added a public GBSG/Rotterdam breast-cancer case-study script that generates

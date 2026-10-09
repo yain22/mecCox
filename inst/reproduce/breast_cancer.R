@@ -3,11 +3,74 @@
 #   Rscript path/to/mecCox/inst/reproduce/breast_cancer.R --seed=20260427
 # Data are loaded from survival; no patient-data download or result export is used.
 # Numerical results can vary with seeds, learner settings, and software versions.
+# If running pasted code, install/update mecCox from GitHub first, or set
+# reproduce_dir to the downloaded repository's inst/reproduce directory.
+reproduce_dir <- getOption("mecCox.reproduce_dir", NULL)
 seed <- 20260427L
 n_folds <- 10L
 n_landmarks <- 20L
 mlp_epochs <- 200L
 rsf_auto_tune <- TRUE
+
+.breast_editor_path <- function() {
+  if (!interactive() || !requireNamespace("rstudioapi", quietly = TRUE)) return("")
+  tryCatch({
+    if (rstudioapi::isAvailable()) rstudioapi::getSourceEditorContext()$path else ""
+  }, error = function(error) "")
+}
+
+.breast_helper_directory <- function(reproduce_dir = NULL,
+    script_files = character(), editor_path = .breast_editor_path(),
+    working_directory = getwd(),
+    installed_directory = system.file("reproduce", package = "mecCox")) {
+  helpers <- c("simulation_helpers.R", "breast_cancer_helpers.R")
+  complete <- function(directory) {
+    nzchar(directory) && all(file.exists(file.path(directory, helpers)))
+  }
+  if (!is.null(reproduce_dir)) {
+    if (!is.character(reproduce_dir) || length(reproduce_dir) != 1L ||
+        is.na(reproduce_dir) || !nzchar(reproduce_dir)) {
+      stop("reproduce_dir must be NULL or the path to the helper directory.",
+           call. = FALSE)
+    }
+    candidates <- c(path.expand(reproduce_dir),
+                    file.path(path.expand(reproduce_dir), "inst", "reproduce"))
+  } else {
+    # Source/Rscript paths and the saved RStudio document work even when the
+    # working directory differs. Ancestors also cover a repository subfolder.
+    paths <- c(script_files, editor_path)
+    paths <- paths[!is.na(paths) & nzchar(paths)]
+    roots <- c(dirname(paths), working_directory)
+    ancestors <- function(path) {
+      path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+      result <- path
+      while (!identical(dirname(path), path)) {
+        path <- dirname(path)
+        result <- c(result, path)
+      }
+      result
+    }
+    roots <- unique(unlist(lapply(roots, ancestors), use.names = FALSE))
+    candidates <- c(unlist(lapply(roots, function(root) {
+      c(root, file.path(root, "inst", "reproduce"),
+        file.path(root, "mecCox", "inst", "reproduce"))
+    }), use.names = FALSE), installed_directory)
+  }
+  candidates <- unique(candidates[!is.na(candidates) & nzchar(candidates)])
+  found <- candidates[vapply(candidates, complete, logical(1))]
+  if (length(found)) return(normalizePath(found[1L], winslash = "/", mustWork = TRUE))
+  detail <- if (is.null(reproduce_dir)) {
+    "The matching helpers were not found beside the script, in the project, or in the installed mecCox package."
+  } else paste0("No complete helper set was found in reproduce_dir: ", reproduce_dir, ".")
+  stop(paste0("Cannot find the breast-cancer helpers (", paste(helpers, collapse = ", "),
+    ").\n", detail,
+    "\nTo run copied code, update the package once in the R console:\n",
+    "  if (!requireNamespace(\"remotes\", quietly = TRUE)) install.packages(\"remotes\")\n",
+    "  remotes::install_github(\"yain22/mecCox\", upgrade = \"never\", force = TRUE)\n",
+    "Then restart R and rerun the script with reproduce_dir <- NULL.\n",
+    "Alternatively, download the complete repository and set reproduce_dir to its ",
+    "inst/reproduce folder, containing both helper files."), call. = FALSE)
+}
 
 source_files <- vapply(sys.frames(), function(frame) {
   if (is.null(frame$ofile)) "" else as.character(frame$ofile)[1L]
@@ -15,19 +78,9 @@ source_files <- vapply(sys.frames(), function(frame) {
 source_files <- rev(source_files[nzchar(source_files)])
 script_option <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_files <- c(source_files, sub("^--file=", "", script_option))
-helper_directories <- unique(c(
-  dirname(script_files), ".", file.path("inst", "reproduce"),
-  file.path("mecCox", "inst", "reproduce"),
-  system.file("reproduce", package = "mecCox")
-))
+helper_directory <- .breast_helper_directory(reproduce_dir, script_files)
 for (helper in c("simulation_helpers.R", "breast_cancer_helpers.R")) {
-  candidates <- file.path(helper_directories[nzchar(helper_directories)], helper)
-  candidates <- candidates[file.exists(candidates)]
-  if (!length(candidates)) {
-    stop("Cannot find ", helper, ". Keep both helpers beside breast_cancer.R ",
-         "or install the current mecCox package.", call. = FALSE)
-  }
-  source(candidates[1L], local = TRUE)
+  source(file.path(helper_directory, helper), local = TRUE)
 }
 
 arguments <- if (interactive() || length(source_files)) {

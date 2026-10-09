@@ -59,6 +59,12 @@ Edit `replications` to choose the number of Monte Carlo runs per
 design cell. The default is 1,000, matching the full simulation design.
 Edit `cores` to choose the maximum worker count.
 
+For Scenario 2, `replications <- 100L` with `quick_run <- FALSE` means
+100 runs in each of 15 design cells: **1,500 simulated datasets**, each with
+two MEC-Cox fits. With `quick_run <- TRUE`, the same explicit count gives
+100 runs in each of three cells, or 300 datasets. For a small installation
+check, set all three values as in the example below.
+
 **The scripts keep results in memory and display them; they do not export
 result files.** In RStudio, the complete summary, reference targets, and run
 settings appear as formatted `kableExtra` HTML tables in the **Viewer** pane.
@@ -207,17 +213,40 @@ each nonlinearity setting using 30,000 treated and 60,000 external controls.
 The three logistic ATT-IPW comparators still share one point estimate. The
 two MEC-Cox variants use cross-fitted BART source
 probabilities and either Cox or RSF control-survival predictions, with ten
-folds and five landmarks. The full script uses 100 BART trees, 1,000 posterior
-draws, 500 burn-in iterations, and shrinkage parameter 2. The RSF uses 500
-trees, with `mtry` and minimum node size tuned within each training fold;
-the fallback minimum node size is 15.
+folds and five landmarks. The full script uses the original study's lightweight
+tuning configuration (`nuisance_settings = "original_study"`). Within each
+training fold, BART selects 25, 50, or 100 trees using a source-balanced tuning
+subset of at most 100 patients. Candidate and selected fits use 100 posterior
+draws, 50 burn-in iterations, and shrinkage parameter 2. If tuning cannot be
+performed, the fallback is 50 trees, 200 posterior draws, and 100 burn-in
+iterations.
+
+RSF tuning uses at most 100 external controls, split approximately equally
+into training and validation sets. It selects `mtry` and minimum node size
+from the original nine-candidate grid, with 100 trees. Forests use randomized
+splits (`extratrees`), one candidate split per variable, and a 63.2% sample
+without replacement. The fallback is 300 trees and minimum node size 15.
 The two MEC-Cox variants use the same BART settings, folds, and seeds, so
 their source-propensity predictions agree. The script and metadata record
 the learner settings.
-The study script fixes these BART settings, while the original study
-code tuned BART within training folds. It runs the study design with
-the public API; its fitting sequence and numerical results can differ from
-those underlying the paper's figure.
+The script fits these BART predictions once per dataset and reuses them for
+the second survival learner. Unused training predictions and OOB error
+calculations are omitted. More workers also require more memory; reduce
+`cores` if concurrent fits exhaust available RAM.
+
+This restores the study's computational settings, not identical historical
+numbers. The package averages BART posterior probability draws and uses
+directional mortality-risk concordance for RSF tuning; the original code
+transformed averaged latent predictions and used an orientation-free
+concordance criterion. Seeds and fitting sequences also differ. Numerical
+results can therefore differ from those underlying the paper's figure.
+
+Scenario 2 reports completed datasets while it runs. If interrupted, it
+returns the results already received from workers in `scenario2_results`,
+with `status = "interrupted"`, completion counts, and a partial summary.
+Unfinished calculations are excluded. Results remain in memory; save any
+objects you need before restarting R. Worker shutdown does not forcibly
+terminate a native learner that is still computing.
 
 The short `--quick` run keeps all three nonlinearity settings, but uses
 `n1 = 200`, two runs per setting unless a different count is selected,
@@ -264,6 +293,21 @@ For a local checkout, use
 `source("path/to/mecCox/inst/reproduce/breast_cancer.R")`. Keep
 `breast_cancer_helpers.R` and `simulation_helpers.R` beside the script when
 downloading individual files.
+The script also checks the saved RStudio document location and project
+ancestors. When using pasted code, an unsaved editor document has no directory;
+install the current package or set `reproduce_dir` at the top of the script
+to the folder containing both helpers. You can also set the persistent
+option `options(mecCox.reproduce_dir = "path/to/mecCox/inst/reproduce")`.
+An older installed package may lack the case-study helpers. Update it once:
+
+```r
+if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+remotes::install_github("yain22/mecCox", upgrade = "never", force = TRUE)
+```
+
+Restart R after installation, then rerun the script. Helpers are loaded from
+one directory so downloaded and installed versions are not mixed.
+
 The two tables open together as `kableExtra` HTML tables in the RStudio
 **Viewer**. They present the supplementary breast-cancer analyses:
 

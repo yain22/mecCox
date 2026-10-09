@@ -54,6 +54,24 @@ choose_worker_count <- function(requested_cores, replications) {
   as.integer(workers)
 }
 
+stop_simulation_cluster <- function(cluster) {
+  if (is.null(cluster)) return(invisible(NULL))
+  # One broken socket must not prevent the other owned sockets from closing,
+  # or replace an interrupt with a second error during stack unwinding.
+  for (node in cluster) {
+    single_node <- structure(list(node), class = class(cluster))
+    tryCatch(suppressWarnings(parallel::stopCluster(single_node)),
+             error = function(condition) NULL,
+             interrupt = function(condition) NULL)
+    if (!is.null(node$con)) {
+      tryCatch(suppressWarnings(close(node$con)),
+               error = function(condition) NULL,
+               interrupt = function(condition) NULL)
+    }
+  }
+  invisible(NULL)
+}
+
 start_simulation_cluster <- function(worker_count, export_names,
                                      envir = parent.frame()) {
   if (worker_count == 1L) return(NULL)
@@ -75,7 +93,7 @@ start_simulation_cluster <- function(worker_count, export_names,
   cluster <- parallel::makePSOCKcluster(worker_count)
   initialized <- FALSE
   on.exit({
-    if (!initialized) parallel::stopCluster(cluster)
+    if (!initialized) stop_simulation_cluster(cluster)
   }, add = TRUE)
   parallel::clusterCall(cluster, function(library_paths, rng_kind) {
     .libPaths(library_paths)
@@ -92,12 +110,36 @@ start_simulation_cluster <- function(worker_count, export_names,
 }
 
 run_simulation_replications <- function(replications, replication_function,
-                                        arguments, cluster = NULL) {
+                                        arguments, cluster = NULL,
+                                        on_result = NULL) {
   # Each scenario sets a seed inside replication_function from the cell and
   # run indices. Random numbers therefore do not depend on the worker
   # that receives a task, even with load-balanced scheduling.
   run_one <- function(replicate, replication_function, arguments) {
     do.call(replication_function, c(arguments, list(replicate = replicate)))
+  }
+  environment(run_one) <- baseenv()
+  if (!is.null(on_result)) {
+    if (!is.function(on_result)) {
+      stop("on_result must be a function or NULL.", call. = FALSE)
+    }
+    results <- vector("list", replications)
+    record_result <- function(replicate, value) {
+      results[replicate] <<- list(value)
+      on_result(replicate, value)
+    }
+    if (is.null(cluster)) {
+      for (replicate in seq_len(replications)) {
+        value <- run_one(replicate, replication_function, arguments)
+        record_result(replicate, value)
+      }
+    } else {
+      run_simulation_socket_completions(
+        cluster, replications, run_one, replication_function, arguments,
+        record_result
+      )
+    }
+    return(results)
   }
   if (is.null(cluster)) {
     lapply(seq_len(replications), run_one,
@@ -107,6 +149,37 @@ run_simulation_replications <- function(replications, replication_function,
                           replication_function = replication_function,
                           arguments = arguments, chunk.size = 1L)
   }
+}
+
+run_simulation_socket_completions <- function(cluster, replications, run_one,
+                                               replication_function, arguments,
+                                               on_result) {
+  # Isolate the two parallel internals needed for completion callbacks. The
+  # public parLapplyLB() only exposes results after the entire batch finishes.
+  send_call <- utils::getFromNamespace("sendCall", "parallel")
+  receive_result <- utils::getFromNamespace("recvOneResult", "parallel")
+  submit <- function(node, replicate) {
+    send_call(cluster[[node]], run_one,
+              list(replicate, replication_function, arguments), tag = replicate)
+  }
+  active <- min(length(cluster), replications)
+  for (node in seq_len(active)) submit(node, node)
+  for (completed in seq_len(replications)) {
+    received <- receive_result(cluster)
+    if (inherits(received$value, "try-error")) {
+      stop(sprintf("Replication %d failed on worker %d: %s",
+                   received$tag, received$node, as.character(received$value)),
+           call. = FALSE)
+    }
+    # Persist the completed result before another task is submitted. If the
+    # callback is interrupted, earlier results remain available to the driver.
+    on_result(received$tag, received$value)
+    next_replicate <- active + completed
+    if (next_replicate <= replications) {
+      submit(received$node, next_replicate)
+    }
+  }
+  invisible(NULL)
 }
 
 check_simulation_display_packages <- function() {
@@ -144,6 +217,9 @@ format_simulation_table <- function(data, title) {
 
 build_simulation_report <- function(results, title) {
   check_simulation_display_packages()
+  execution <- results$metadata$execution
+  partial <- !is.null(execution$status) && execution$status != "completed"
+  if (partial) title <- paste(title, "(partial results)")
   if (is.data.frame(results$targets)) {
     targets <- results$targets
     if ("target" %in% names(targets)) targets$target_hr <- exp(targets$target)
@@ -194,8 +270,12 @@ build_simulation_report <- function(results, title) {
     ),
     htmltools::tags$h1(title),
     htmltools::tags$p(
-      "The complete aggregated results are shown below. Individual ",
-      "individual simulation results remain available in the R session."
+      if (partial) sprintf(
+        "The run was %s; %d of %d planned datasets are included. ",
+        execution$status, execution$completed_replications,
+        execution$planned_replications
+      ) else "The complete aggregated results are shown below. ",
+      "Individual simulation results remain available in the R session."
     ),
     content
   ))
@@ -295,6 +375,8 @@ plot_scenario1_results <- function(summary) {
 }
 
 plot_scenario2_results <- function(summary, settings) {
+  settings <- settings[settings$setting %in% summary$setting, , drop = FALSE]
+  if (!nrow(settings)) return(invisible(FALSE))
   if (!simulation_graphics_available()) return(invisible(FALSE))
   methods <- c("Naive", "Robust sandwich", "Corrected sandwich",
                "MEC-Cox (BART/Cox)", "MEC-Cox (BART/RSF)")

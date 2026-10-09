@@ -14,6 +14,58 @@ for (expression in as.list(parse(file.path(breast_directory, "breast_cancer.R"))
   }
 }
 
+testthat::test_that("breast-cancer helpers are found from editor, source, and project paths", {
+  scratch <- tempfile("breast helper lookup ")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  repository <- file.path(scratch, "project with spaces")
+  helpers <- file.path(repository, "inst", "reproduce")
+  nested <- file.path(repository, "analysis", "drafts")
+  unrelated <- file.path(scratch, "elsewhere")
+  dir.create(helpers, recursive = TRUE)
+  dir.create(nested, recursive = TRUE)
+  dir.create(unrelated)
+  file.create(file.path(helpers, c("simulation_helpers.R", "breast_cancer_helpers.R")))
+  script <- file.path(helpers, "breast_cancer.R")
+  expected <- normalizePath(helpers, winslash = "/")
+  locate <- function(...) breast_helpers$.breast_helper_directory(
+    ..., installed_directory = "")
+  testthat::expect_identical(locate(script_files = script, editor_path = "",
+    working_directory = unrelated), expected)
+  testthat::expect_identical(locate(editor_path = script,
+    working_directory = unrelated), expected)
+  testthat::expect_identical(locate(editor_path = "",
+    working_directory = nested), expected)
+  testthat::expect_identical(locate(reproduce_dir = repository,
+    editor_path = "", working_directory = unrelated), expected)
+  testthat::expect_identical(locate(reproduce_dir = helpers,
+    editor_path = "", working_directory = unrelated), expected)
+})
+
+testthat::test_that("pasted breast-cancer code uses a complete installed helper bundle", {
+  scratch <- tempfile("breast installed lookup ")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  local <- file.path(scratch, "copied script")
+  installed <- file.path(scratch, "installed package", "reproduce")
+  dir.create(local)
+  dir.create(installed, recursive = TRUE)
+  file.create(file.path(local, "simulation_helpers.R"))
+  file.create(file.path(installed,
+                       c("simulation_helpers.R", "breast_cancer_helpers.R")))
+  locate <- function(...) breast_helpers$.breast_helper_directory(
+    ..., script_files = character(), editor_path = "",
+    working_directory = local, installed_directory = installed)
+  testthat::expect_identical(locate(), normalizePath(installed, winslash = "/"))
+  # An explicit bad location is reported, rather than silently ignored.
+  testthat::expect_error(locate(reproduce_dir = local), "reproduce_dir", fixed = TRUE)
+  testthat::expect_error(locate(reproduce_dir = NA_character_), "reproduce_dir", fixed = TRUE)
+  unlink(file.path(installed, "breast_cancer_helpers.R"))
+  testthat::expect_error(locate(), 'remotes::install_github("yain22/mecCox"', fixed = TRUE)
+  testthat::expect_error(locate(), "force = TRUE", fixed = TRUE)
+  testthat::expect_error(locate(), "containing both helper files", fixed = TRUE)
+})
+
 testthat::test_that("public cohorts, endpoint, and unsupported category are preserved", {
   data <- breast_helpers$prepare_breast_cancer_data()
   testthat::expect_equal(nrow(data), 2889L)

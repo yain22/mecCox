@@ -154,14 +154,94 @@
   as.numeric(probabilities[[".pred_1"]])
 }
 
+.mec_balanced_tuning_rows <- function(source, tune_n) {
+  if (length(source) <= tune_n) return(seq_along(source))
+  target <- which(source == 1L)
+  controls <- which(source == 0L)
+  target_count <- min(length(target), floor(tune_n / 2))
+  control_count <- min(length(controls), tune_n - target_count)
+  remaining <- tune_n - target_count - control_count
+  extra_target <- min(remaining, length(target) - target_count)
+  target_count <- target_count + extra_target
+  control_count <- control_count + min(
+    remaining - extra_target, length(controls) - control_count
+  )
+  sort(c(utils::head(target, target_count),
+         utils::head(controls, control_count)))
+}
+
+.mec_tune_bart <- function(training, covariates, seed, tune_n, shrinkage,
+                           trim) {
+  tuning <- training[.mec_balanced_tuning_rows(training$A, tune_n), ,
+                     drop = FALSE]
+  if (nrow(tuning) < 20L || length(unique(tuning$A)) < 2L) {
+    warning("Too few source observations for BART tuning; using supplied settings.",
+            call. = FALSE)
+    return(NULL)
+  }
+  training_rows <- .mec_with_seed(seed, {
+    sort(unlist(lapply(sort(unique(tuning$A)), function(source) {
+      rows <- which(tuning$A == source)
+      if (length(rows) <= 2L) return(rows)
+      rows[sample.int(length(rows), max(1L, floor(0.70 * length(rows))))]
+    }), use.names = FALSE))
+  })
+  validation_rows <- setdiff(seq_len(nrow(tuning)), training_rows)
+  if (length(unique(tuning$A[training_rows])) < 2L ||
+      length(unique(tuning$A[validation_rows])) < 2L) {
+    warning("The BART tuning split lacks both source groups; using supplied settings.",
+            call. = FALSE)
+    return(NULL)
+  }
+  grid <- data.frame(num_trees = c(25L, 50L, 100L),
+                     posterior_draws = 100L, burn_in = 50L)
+  loss <- rep(Inf, nrow(grid))
+  for (candidate in seq_len(nrow(grid))) {
+    loss[candidate] <- tryCatch({
+      probability <- .mec_propensity_bart(
+        tuning[training_rows, , drop = FALSE],
+        tuning[validation_rows, , drop = FALSE], covariates, seed,
+        num_trees = grid$num_trees[candidate],
+        posterior_draws = grid$posterior_draws[candidate],
+        burn_in = grid$burn_in[candidate], shrinkage = shrinkage
+      )
+      probability <- pmin(pmax(probability, trim[1L]), trim[2L])
+      observed <- tuning$A[validation_rows]
+      -mean(observed * log(probability) +
+              (1 - observed) * log1p(-probability))
+    }, error = function(error) Inf)
+  }
+  if (all(!is.finite(loss))) {
+    warning("All BART tuning candidates failed; using supplied settings.",
+            call. = FALSE)
+    return(NULL)
+  }
+  selected <- which.min(loss)
+  list(num_trees = grid$num_trees[selected],
+       posterior_draws = grid$posterior_draws[selected],
+       burn_in = grid$burn_in[selected], shrinkage = shrinkage,
+       log_loss = loss[selected], candidates = cbind(grid, log_loss = loss),
+       tuning_rows = nrow(tuning), training_rows = length(training_rows),
+       validation_rows = length(validation_rows), seed = seed)
+}
+
 .mec_propensity_bart <- function(training, validation, covariates, seed,
                                  num_trees, posterior_draws, burn_in,
-                                 shrinkage) {
+                                 shrinkage, auto_tune = FALSE, tune_n = 100L,
+                                 trim = c(0.01, 0.99), return_details = FALSE) {
   if (!requireNamespace("dbarts", quietly = TRUE)) {
     stop("Install {dbarts} to use `ps_learner = 'bart'`.", call. = FALSE)
   }
   .mec_check_factor_levels(training, validation, covariates,
                            "Propensity BART")
+  tuning <- if (auto_tune) {
+    .mec_tune_bart(training, covariates, seed, tune_n, shrinkage, trim)
+  } else NULL
+  if (!is.null(tuning)) {
+    num_trees <- tuning$num_trees
+    posterior_draws <- tuning$posterior_draws
+    burn_in <- tuning$burn_in
+  }
 
   design_formula <- stats::reformulate(covariates)
   x_train <- stats::model.matrix(design_formula, training)[, -1L, drop = FALSE]
@@ -185,6 +265,7 @@
     binaryOffset = binary_offset,
     verbose = FALSE,
     keeptrees = FALSE,
+    keeptrainfits = FALSE,
     nthread = 1L,
     seed = as.integer(seed)
   ))
@@ -204,6 +285,13 @@
   } else {
     stop("BART did not return validation-set source probabilities.",
          call. = FALSE)
+  }
+  if (return_details) {
+    return(list(probabilities = probabilities, tuning = tuning,
+                parameters = list(num_trees = num_trees,
+                                  posterior_draws = posterior_draws,
+                                  burn_in = burn_in, shrinkage = shrinkage,
+                                  seed = seed)))
   }
   probabilities
 }
@@ -246,10 +334,16 @@
   list(survival = survival, fit = fit, baseline = baseline)
 }
 
-.mec_tune_rsf <- function(training, covariates, landmarks, seed) {
+.mec_tune_rsf <- function(training, covariates, landmarks, seed,
+                           nuisance_settings = "standard", tune_n = 100L) {
   controls <- training[training$A == 0L, , drop = FALSE]
   p <- length(covariates)
   default <- list(mtry = max(1L, floor(sqrt(p))), min_node_size = 15L)
+  original_study <- identical(nuisance_settings, "original_study")
+  if (original_study) {
+    controls <- utils::head(controls, tune_n)
+    default$num_trees <- 300L
+  }
   if (nrow(controls) < 30L || sum(controls$delta) < 8L) {
     warning("Too few external-control outcomes for RSF tuning; using defaults.",
             call. = FALSE)
@@ -259,10 +353,18 @@
   training_rows <- .mec_with_seed(seed, {
     event_rows <- which(controls$delta == 1L)
     censored_rows <- which(controls$delta == 0L)
-    sort(c(
-      sample(event_rows, floor(0.6 * length(event_rows))),
-      sample(censored_rows, floor(0.6 * length(censored_rows)))
-    ))
+    if (original_study) {
+      draw_half <- function(rows) {
+        if (!length(rows)) return(integer())
+        rows[sample.int(length(rows), max(1L, floor(0.5 * length(rows))))]
+      }
+      sort(c(draw_half(event_rows), draw_half(censored_rows)))
+    } else {
+      sort(c(
+        sample(event_rows, floor(0.6 * length(event_rows))),
+        sample(censored_rows, floor(0.6 * length(censored_rows)))
+      ))
+    }
   })
   validation_rows <- setdiff(seq_len(nrow(controls)), training_rows)
   if (length(validation_rows) < 10L ||
@@ -274,16 +376,38 @@
 
   tuning_train <- controls[training_rows, , drop = FALSE]
   tuning_valid <- controls[validation_rows, , drop = FALSE]
-  .mec_check_factor_levels(tuning_train, tuning_valid, covariates,
-                           "RSF tuning")
+  if (original_study) {
+    valid_levels <- tryCatch({
+      .mec_check_factor_levels(tuning_train, tuning_valid, covariates,
+                               "RSF tuning")
+      TRUE
+    }, error = function(error) FALSE)
+    if (!valid_levels) {
+      warning("The RSF tuning subset has inadequate factor levels; using defaults.",
+              call. = FALSE)
+      return(default)
+    }
+  } else {
+    .mec_check_factor_levels(tuning_train, tuning_valid, covariates,
+                             "RSF tuning")
+  }
   train_frame <- tuning_train[, c("time", "delta", covariates), drop = FALSE]
   validation_frame <- tuning_valid[, covariates, drop = FALSE]
   Surv <- survival::Surv
   survival_formula <- stats::as.formula("Surv(time, delta) ~ .")
-  grid <- expand.grid(
-    mtry = sort(unique(pmax(1L, c(floor(sqrt(p)), ceiling(p / 2))))),
-    min_node_size = c(15L, 30L)
-  )
+  grid <- if (original_study) {
+    expand.grid(
+      mtry = sort(unique(pmax(1L, pmin(p, c(
+        floor(sqrt(p)), ceiling(p / 3), ceiling(p / 2)
+      ))))), min_node_size = c(15L, 30L, 50L)
+    )
+  } else {
+    expand.grid(
+      mtry = sort(unique(pmax(1L, c(floor(sqrt(p)), ceiling(p / 2))))),
+      min_node_size = c(15L, 30L)
+    )
+  }
+  candidate_trees <- if (original_study) 100L else 200L
   discrimination <- rep(-Inf, nrow(grid))
   evaluation_time <- stats::median(landmarks)
 
@@ -291,12 +415,16 @@
     discrimination[candidate] <- tryCatch({
       fit <- ranger::ranger(
         survival_formula, data = train_frame,
-        num.trees = 200L, mtry = grid$mtry[candidate],
+        num.trees = candidate_trees, mtry = grid$mtry[candidate],
         min.node.size = grid$min_node_size[candidate],
-        splitrule = "logrank", write.forest = TRUE,
+        splitrule = if (original_study) "extratrees" else "logrank",
+        num.random.splits = 1L, replace = !original_study,
+        sample.fraction = if (original_study) 0.632 else 1,
+        write.forest = TRUE, oob.error = FALSE,
         num.threads = 1L, seed = as.integer(seed)
       )
-      prediction <- stats::predict(fit, data = validation_frame)
+      prediction <- stats::predict(fit, data = validation_frame,
+                                   num.threads = 1L)
       event_times <- prediction$unique.death.times
       if (is.null(event_times)) {
         event_times <- fit$unique.death.times
@@ -313,12 +441,22 @@
     }, error = function(error) -Inf)
   }
   if (all(!is.finite(discrimination))) {
+    if (original_study) {
+      warning("All RSF tuning candidates failed; using defaults.", call. = FALSE)
+      return(default)
+    }
     stop("All RSF tuning candidates failed.", call. = FALSE)
   }
   selected <- which.max(discrimination)
-  list(mtry = as.integer(grid$mtry[selected]),
-       min_node_size = as.integer(grid$min_node_size[selected]),
-       c_index = discrimination[selected])
+  answer <- list(mtry = as.integer(grid$mtry[selected]),
+                 min_node_size = as.integer(grid$min_node_size[selected]),
+                 c_index = discrimination[selected],
+                 candidate_num_trees = candidate_trees,
+                 candidates = cbind(grid, c_index = discrimination),
+                 tuning_rows = nrow(controls), training_rows = nrow(tuning_train),
+                 validation_rows = nrow(tuning_valid), seed = seed)
+  if (original_study) answer$num_trees <- candidate_trees
+  answer
 }
 
 .mec_risk_concordance <- function(time, event, predicted_risk) {
@@ -330,7 +468,9 @@
 
 .mec_predict_rsf_survival <- function(training, validation, covariates,
                                       landmarks, seed, num_trees,
-                                      min_node_size, auto_tune) {
+                                      min_node_size, auto_tune,
+                                      nuisance_settings = "standard",
+                                      tune_n = 100L) {
   if (!requireNamespace("ranger", quietly = TRUE)) {
     stop("Install {ranger} to use `survival_learner = 'rsf'`.", call. = FALSE)
   }
@@ -346,10 +486,13 @@
   prediction_frame <- validation[, covariates, drop = FALSE]
   Surv <- survival::Surv
   survival_formula <- stats::as.formula("Surv(time, delta) ~ .")
+  original_study <- identical(nuisance_settings, "original_study")
   if (auto_tune) {
-    tuning <- .mec_tune_rsf(training, covariates, landmarks, seed)
+    tuning <- .mec_tune_rsf(training, covariates, landmarks, seed,
+                            nuisance_settings, tune_n)
     mtry <- tuning$mtry
     min_node_size <- tuning$min_node_size
+    if (!is.null(tuning$num_trees)) num_trees <- tuning$num_trees
   } else {
     tuning <- NULL
     mtry <- max(1L, floor(sqrt(length(covariates))))
@@ -359,10 +502,13 @@
     num.trees = as.integer(num_trees),
     mtry = mtry,
     min.node.size = as.integer(min_node_size),
-    splitrule = "logrank", write.forest = TRUE,
+    splitrule = if (original_study) "extratrees" else "logrank",
+    num.random.splits = 1L, replace = !original_study,
+    sample.fraction = if (original_study) 0.632 else 1,
+    write.forest = TRUE, oob.error = FALSE,
     num.threads = 1L, seed = as.integer(seed)
   )
-  prediction <- stats::predict(fit, data = prediction_frame)
+  prediction <- stats::predict(fit, data = prediction_frame, num.threads = 1L)
   event_times <- prediction$unique.death.times
   if (is.null(event_times)) {
     event_times <- fit$unique.death.times
@@ -384,7 +530,13 @@
     stop("RSF survival predictions are non-finite.", call. = FALSE)
   }
   list(survival = survival, fit = fit, event_times = event_times,
-       tuning = tuning)
+       tuning = tuning,
+       parameters = list(num_trees = num_trees, mtry = mtry,
+                         min_node_size = min_node_size,
+                         splitrule = if (original_study) "extratrees" else "logrank",
+                         replace = !original_study,
+                         sample_fraction = if (original_study) 0.632 else 1,
+                         num_random_splits = 1L, seed = seed))
 }
 
 .mec_crossfit_nuisance <- function(data, covariates, ps_learner,
@@ -393,12 +545,15 @@
                                    bart_num_trees, bart_posterior_draws,
                                    bart_burn_in, bart_shrinkage,
                                    rsf_num_trees, rsf_min_node_size,
-                                   rsf_auto_tune) {
+                                   rsf_auto_tune, ps_predictions = NULL,
+                                   nuisance_settings = "standard",
+                                   bart_auto_tune = FALSE, ml_tune_n = 100L) {
   n <- nrow(data)
   n_landmarks <- length(landmarks)
-  ps_oof <- rep(NA_real_, n)
+  ps_oof <- if (is.null(ps_predictions)) rep(NA_real_, n) else ps_predictions
   survival_oof <- matrix(NA_real_, nrow = n, ncol = n_landmarks)
   outcome_fits <- vector("list", max(fold_id))
+  propensity_tuning <- vector("list", max(fold_id))
 
   for (fold in sort(unique(fold_id))) {
     train_rows <- fold_id != fold
@@ -406,25 +561,30 @@
     training <- data[train_rows, , drop = FALSE]
     validation <- data[valid_rows, , drop = FALSE]
 
-    if (ps_learner == "glm") {
-      ps_oof[valid_rows] <- .mec_propensity_glm(
-        training, validation, covariates
-      )
-    } else if (ps_learner == "mlp") {
-      ps_oof[valid_rows] <- .mec_propensity_mlp(
-        training, validation, covariates,
-        seed = seed + fold,
-        hidden_units = mlp_hidden_units, epochs = mlp_epochs
-      )
-    } else {
-      ps_oof[valid_rows] <- .mec_propensity_bart(
-        training, validation, covariates,
-        seed = seed + fold,
-        num_trees = bart_num_trees,
-        posterior_draws = bart_posterior_draws,
-        burn_in = bart_burn_in,
-        shrinkage = bart_shrinkage
-      )
+    if (is.null(ps_predictions)) {
+      if (ps_learner == "glm") {
+        ps_oof[valid_rows] <- .mec_propensity_glm(
+          training, validation, covariates
+        )
+      } else if (ps_learner == "mlp") {
+        ps_oof[valid_rows] <- .mec_propensity_mlp(
+          training, validation, covariates,
+          seed = seed + fold,
+          hidden_units = mlp_hidden_units, epochs = mlp_epochs
+        )
+      } else {
+        propensity_result <- .mec_propensity_bart(
+          training, validation, covariates,
+          seed = seed + fold,
+          num_trees = bart_num_trees,
+          posterior_draws = bart_posterior_draws,
+          burn_in = bart_burn_in,
+          shrinkage = bart_shrinkage, auto_tune = bart_auto_tune,
+          tune_n = ml_tune_n, trim = ps_trim, return_details = TRUE
+        )
+        ps_oof[valid_rows] <- propensity_result$probabilities
+        propensity_tuning[[fold]] <- propensity_result[c("parameters", "tuning")]
+      }
     }
 
     if (survival_learner == "cox") {
@@ -437,7 +597,8 @@
         seed = seed + fold,
         num_trees = rsf_num_trees,
         min_node_size = rsf_min_node_size,
-        auto_tune = rsf_auto_tune
+        auto_tune = rsf_auto_tune, nuisance_settings = nuisance_settings,
+        tune_n = ml_tune_n
       )
     }
     survival_oof[valid_rows, ] <- outcome_result$survival
@@ -468,7 +629,7 @@
 
   list(ps_oof = ps_oof, survival_oof = survival_oof,
        basis = basis, retained_basis = retained,
-       outcome_fits = outcome_fits)
+       outcome_fits = outcome_fits, propensity_tuning = propensity_tuning)
 }
 
 .mec_kl_calibrate <- function(control_basis, target_basis, base_weights,
@@ -559,7 +720,7 @@
   )
 }
 
-.mec_cox_score <- function(theta, data, weights) {
+.mec_cox_score <- function(theta, data, weights, individual = TRUE) {
   source <- data$A
   time <- data$time
   event <- data$delta
@@ -578,6 +739,8 @@
   group_index <- match(time, distinct_times)
   source_fraction <- source_risk_sum[group_index] / risk_sum[group_index]
   event_contribution <- weights * event * (source - source_fraction)
+  score <- sum(event_contribution)
+  if (!individual) return(list(score = score))
 
   event_times <- sort(unique(time[event == 1L]))
   event_weight <- as.numeric(tapply(
@@ -599,7 +762,7 @@
   risk_contribution <- weights * relative_risk *
     (source * risk_term - source_term)
 
-  list(score = sum(event_contribution),
+  list(score = score,
        contribution = event_contribution - risk_contribution)
 }
 
@@ -622,7 +785,9 @@
   n <- nrow(data)
   score_result <- .mec_cox_score(theta, data, weights)
   derivative_theta <- .mec_central_difference(
-    function(candidate) .mec_cox_score(candidate[1L], data, weights)$score,
+    function(candidate) .mec_cox_score(
+      candidate[1L], data, weights, individual = FALSE
+    )$score,
     x = theta
   )
 
@@ -633,7 +798,7 @@
     candidate_weights <- numeric(n)
     candidate_weights[target_rows] <- 1
     candidate_weights[control_rows] <- control_weights
-    .mec_cox_score(theta, data, candidate_weights)$score
+    .mec_cox_score(theta, data, candidate_weights, individual = FALSE)$score
   }
   derivative_lambda <- .mec_central_difference(score_at_lambda, lambda)
 
@@ -721,10 +886,42 @@
 #' @param max_calibration_iter Maximum number of KL Newton steps.
 #' @param mlp_hidden_units,mlp_epochs MLP architecture and training epochs.
 #' @param bart_num_trees,bart_posterior_draws,bart_burn_in,bart_shrinkage
-#'   Fixed BART training settings; this function does not tune BART.
+#'   BART training settings, used directly when tuning is disabled or as
+#'   fallbacks if tuning fails. The standard defaults are 100 trees, 1000
+#'   posterior draws, 500 burn-in draws, and shrinkage 2. Under
+#'   `nuisance_settings = "original_study"`, unspecified values instead use
+#'   50 trees, 200 posterior draws, and 100 burn-in draws, with shrinkage 2.
 #' @param rsf_num_trees,rsf_min_node_size Random survival forest controls.
 #' @param rsf_auto_tune If `TRUE`, select the RSF `mtry` and minimum node size
 #'   within each training fold using a source-control training/validation split.
+#' @param ps_predictions Optional numeric vector of out-of-fold source
+#'   probabilities, one per row of `data`, strictly inside (0, 1). Supplying this
+#'   vector skips propensity fitting and applies `ps_trim` as usual. The caller
+#'   must ensure the predictions use the same rows, row order, covariates, and
+#'   source-stratified folds defined by `n_folds` and `seed`. To reuse a previous
+#'   fit's `ps_oof` when changing the survival learner, keep these inputs and
+#'   `ps_trim` unchanged; earlier clipping cannot be undone. This function checks
+#'   the vector's length and values, not its training provenance.
+#' @param nuisance_settings Learner configuration. `"standard"` retains the
+#'   general-purpose settings. `"original_study"` uses the lightweight tuning
+#'   and forest controls from the original two-outcome-learner simulation:
+#'   source-balanced BART tuning on at most `ml_tune_n` rows with a 70/30
+#'   stratified split; and RSF tuning on the first at most `ml_tune_n` controls
+#'   with a 50/50 event-stratified split. The RSF uses extremely randomized
+#'   splits, one candidate split, sampling without replacement at fraction
+#'   0.632, and 100 trees after successful tuning (300 trees by default without
+#'   tuning or if tuning fails). The preset retains this package's deterministic
+#'   fold seeds, posterior averaging of BART probabilities, and correctly
+#'   oriented mortality concordance; it does not reproduce the original
+#'   script's latent-score averaging or orientation-free concordance.
+#' @param bart_auto_tune Whether to choose BART tree count from 25, 50, and 100
+#'   using held-out log loss within each training fold. Candidates and the final
+#'   selected fit use 100 posterior draws and 50 burn-in draws; shrinkage stays
+#'   at `bart_shrinkage`. `NULL` enables tuning for `"original_study"` and
+#'   disables it for `"standard"`. Set `FALSE` to use the supplied BART controls.
+#' @param ml_tune_n Maximum subset size for BART tuning and for RSF tuning under
+#'   `"original_study"`. Standard RSF tuning continues to use all training-fold
+#'   controls. Tuning subsets never include the held-out cross-fitting fold.
 #' @param ... Reserved; unsupported arguments cause an error.
 #'
 #' @return An object of class `mec_cox_fit` containing the log-hazard-ratio
@@ -733,6 +930,9 @@
 #'   model fits, and calibration and weight diagnostics. The working sandwich
 #'   accounts for estimation of the calibration multiplier but treats the
 #'   cross-fitted nuisance learners as fixed.
+#'   `propensity_tuning` and `outcome_fits` record the fold-specific learner
+#'   parameters and tuning results. Supplied propensity predictions have no
+#'   recorded propensity-training metadata.
 #' @examples
 #' data(example_external_controls)
 #' fit <- fit_mec_cox(
@@ -761,13 +961,34 @@ fit_mec_cox <- function(data, time, event, source, covariates,
                         bart_shrinkage = 2,
                         rsf_num_trees = 500L,
                         rsf_min_node_size = 15L,
-                        rsf_auto_tune = TRUE, ...) {
+                        rsf_auto_tune = TRUE, ps_predictions = NULL,
+                        nuisance_settings = c("standard", "original_study"),
+                        bart_auto_tune = NULL, ml_tune_n = 100L, ...) {
   call <- match.call()
   if (length(list(...))) {
     stop("Unsupported argument in `...`.", call. = FALSE)
   }
   ps_learner <- match.arg(ps_learner)
   survival_learner <- match.arg(survival_learner)
+  nuisance_settings <- match.arg(nuisance_settings)
+  if (is.null(bart_auto_tune)) {
+    bart_auto_tune <- identical(nuisance_settings, "original_study")
+  }
+  if (!is.logical(bart_auto_tune) || length(bart_auto_tune) != 1L ||
+      is.na(bart_auto_tune)) {
+    stop("`bart_auto_tune` must be TRUE, FALSE, or NULL.", call. = FALSE)
+  }
+  if (!is.numeric(ml_tune_n) || length(ml_tune_n) != 1L ||
+      !is.finite(ml_tune_n) || ml_tune_n < 1L ||
+      ml_tune_n != as.integer(ml_tune_n)) {
+    stop("`ml_tune_n` must be a positive integer.", call. = FALSE)
+  }
+  if (nuisance_settings == "original_study") {
+    if (missing(bart_num_trees)) bart_num_trees <- 50L
+    if (missing(bart_posterior_draws)) bart_posterior_draws <- 200L
+    if (missing(bart_burn_in)) bart_burn_in <- 100L
+    if (missing(rsf_num_trees)) rsf_num_trees <- 300L
+  }
   if (!is.character(covariates) || !length(covariates)) {
     stop("`covariates` must name at least one baseline covariate.",
          call. = FALSE)
@@ -775,6 +996,17 @@ fit_mec_cox <- function(data, time, event, source, covariates,
   analysis_data <- .pkg_validate_data(
     data, time, event, source, covariates
   )
+  if (!is.null(ps_predictions)) {
+    if (!is.numeric(ps_predictions) || !is.null(dim(ps_predictions)) ||
+        length(ps_predictions) != nrow(analysis_data) ||
+        any(!is.finite(ps_predictions)) ||
+        any(ps_predictions <= 0 | ps_predictions >= 1)) {
+      stop("`ps_predictions` must be a finite numeric vector with one ",
+           "probability strictly inside (0, 1) per row of `data`.",
+           call. = FALSE)
+    }
+    ps_predictions <- as.numeric(ps_predictions)
+  }
 
   if (!is.numeric(n_folds) || length(n_folds) != 1L ||
       !is.finite(n_folds) ||
@@ -873,7 +1105,7 @@ fit_mec_cox <- function(data, time, event, source, covariates,
     bart_num_trees, bart_posterior_draws,
     bart_burn_in, bart_shrinkage,
     rsf_num_trees, rsf_min_node_size,
-    rsf_auto_tune
+    rsf_auto_tune, ps_predictions, nuisance_settings, bart_auto_tune, ml_tune_n
   )
 
   target_rows <- which(analysis_data$A == 1L)
@@ -935,9 +1167,14 @@ fit_mec_cox <- function(data, time, event, source, covariates,
     retained_basis = nuisance$retained_basis,
     fold_id = fold_id,
     outcome_fits = nuisance$outcome_fits,
+    propensity_tuning = nuisance$propensity_tuning,
     analysis_data = analysis_data,
     covariates = covariates,
     ps_learner = ps_learner,
+    ps_predictions_supplied = !is.null(ps_predictions),
+    nuisance_settings = nuisance_settings,
+    bart_auto_tune = bart_auto_tune,
+    ml_tune_n = ml_tune_n,
     survival_learner = survival_learner,
     rsf_auto_tune = rsf_auto_tune,
     calibration = calibration,
@@ -984,7 +1221,8 @@ fit_mec_cox <- function(data, time, event, source, covariates,
     } else {
       prediction <- stats::predict(
         fold_fit$fit,
-        data = validation[, object$covariates, drop = FALSE]
+        data = validation[, object$covariates, drop = FALSE],
+        num.threads = 1L
       )
       event_times <- fold_fit$event_times
       event_index <- findInterval(times, event_times)

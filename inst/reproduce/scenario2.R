@@ -58,6 +58,14 @@ suppressPackageStartupMessages({
   library(survival)
 })
 
+if (!all(c("ps_predictions", "nuisance_settings", "bart_auto_tune") %in%
+         names(formals(fit_mec_cox)))) {
+  stop("Update the mecCox package and restart R before using this script. ",
+       "This version uses the original-study learner settings and reuses ",
+       "cross-fitted propensity predictions.",
+       call. = FALSE)
+}
+
 required_packages <- c("dbarts", "ranger")
 missing_packages <- required_packages[!vapply(
   required_packages, requireNamespace, logical(1), quietly = TRUE
@@ -82,11 +90,17 @@ design <- list(
   weibull_shape = 2,
   censoring_rate = 0.0008,
   conditional_log_hr = log(0.70),
-  bart_num_trees = 100L,
-  bart_posterior_draws = 1000L,
-  bart_burn_in = 500L,
+  nuisance_settings = "original_study",
+  bart_auto_tune = TRUE,
+  ml_tune_n = 100L,
+  # Fallback settings; successful original-study tuning selects 25/50/100
+  # BART trees with 100 posterior draws and 50 burn-in iterations.
+  bart_num_trees = 50L,
+  bart_posterior_draws = 200L,
+  bart_burn_in = 100L,
   bart_shrinkage = 2,
-  rsf_num_trees = 500L,
+  # Successful original-study RSF tuning selects a 100-tree forest.
+  rsf_num_trees = 300L,
   rsf_min_node_size = 15L,
   rsf_auto_tune = TRUE
 )
@@ -106,6 +120,7 @@ if (options$quick_run) {
   design$bart_num_trees <- 25L
   design$bart_posterior_draws <- 50L
   design$bart_burn_in <- 25L
+  design$bart_auto_tune <- FALSE
   design$rsf_num_trees <- 100L
   design$rsf_auto_tune <- FALSE
   message("Quick check: all three settings, reduced workload, target ",
@@ -282,8 +297,9 @@ run_replication <- function(setting, treated_count, replicate, target, design) {
     }
   }
 
-  # Both variants use identical folds, BART controls, and seeds. Their source
-  # predictions therefore agree; only the control-survival learner changes.
+  # Reuse the same out-of-fold BART predictions for both survival learners.
+  # If the first fit fails, the second fit can still train its own BART models.
+  ps_predictions <- NULL
   survival_learners <- c(cox = "MEC-Cox (BART/Cox)", rsf = "MEC-Cox (BART/RSF)")
   for (index in seq_along(survival_learners)) {
     learner <- names(survival_learners)[index]
@@ -299,7 +315,11 @@ run_replication <- function(setting, treated_count, replicate, target, design) {
         bart_shrinkage = design$bart_shrinkage,
         rsf_num_trees = design$rsf_num_trees,
         rsf_min_node_size = design$rsf_min_node_size,
-        rsf_auto_tune = design$rsf_auto_tune
+        rsf_auto_tune = design$rsf_auto_tune,
+        ps_predictions = ps_predictions,
+        nuisance_settings = design$nuisance_settings,
+        bart_auto_tune = design$bart_auto_tune,
+        ml_tune_n = design$ml_tune_n
       ),
       error = function(condition) condition
     )
@@ -310,6 +330,7 @@ run_replication <- function(setting, treated_count, replicate, target, design) {
         target, design, error = conditionMessage(mec)
       )
     } else {
+      ps_predictions <- mec$ps_oof
       rows[[row_index]] <- make_result(
         setting, treated_count, replicate, survival_learners[index],
         target, design, estimate = mec$theta, standard_error = mec$se
@@ -349,67 +370,127 @@ summarize_scenario2_results <- function(results, settings) {
 }
 
 run_scenario2 <- function(design, settings, options) {
+  started <- proc.time()[["elapsed"]]
   worker_count <- choose_worker_count(options$cores, design$replications)
+  planned_cells <- nrow(settings) * length(design$treated_sizes)
+  planned_replications <- planned_cells * design$replications
+  state <- new.env(parent = emptyenv())
+  state$rows <- vector("list", planned_replications)
+  state$completed <- 0L
+  state$status <- "completed"
+  state$condition <- NULL
+  cluster <- NULL
+  on.exit(stop_simulation_cluster(cluster), add = TRUE)
   export_names <- c("source_probability", "draw_source_covariates",
                     "control_log_hazard", "draw_observed_data", "make_result",
                     "run_replication")
-  cluster <- start_simulation_cluster(worker_count, export_names,
-                                      envir = environment(run_replication))
-  if (!is.null(cluster)) {
-    on.exit(parallel::stopCluster(cluster), add = TRUE)
-  }
   execution <- list(
     requested_cores = options$cores,
     workers = worker_count,
-    backend = if (is.null(cluster)) "serial" else "PSOCK",
+    backend = if (worker_count == 1L) "serial" else "PSOCK",
     rng_kind = RNGkind()
   )
   message(sprintf("Scenario 2 uses %d worker(s); %d requested.",
                   worker_count, options$cores))
-
-  message("Computing the three ATT Cox-projection reference targets ...")
+  message(sprintf(
+    "Workload: %d settings x %d sample sizes = %d cells; %d runs per cell = %d datasets in total.",
+    nrow(settings), length(design$treated_sizes), planned_cells,
+    design$replications, planned_replications
+  ))
   targets <- settings
-  targets$target <- vapply(seq_len(nrow(settings)), function(index) {
-    target <- compute_reference_target(settings[index, , drop = FALSE], design)
-    message(sprintf("%s: reference log-hazard ratio %.6f",
-                    settings$setting[index], target))
-    target
-  }, numeric(1))
+  targets$target <- rep(NA_real_, nrow(settings))
+  tryCatch({
+    cluster <- start_simulation_cluster(worker_count, export_names,
+                                        envir = environment(run_replication))
+    message("Computing the ATT Cox-projection reference targets ...")
+    for (index in seq_len(nrow(settings))) {
+      targets$target[index] <- compute_reference_target(
+        settings[index, , drop = FALSE], design
+      )
+      message(sprintf("%s: reference log-hazard ratio %.6f",
+                      settings$setting[index], targets$target[index]))
+    }
+
+    cell_index <- 0L
+    for (setting_index in seq_len(nrow(settings))) {
+      setting <- settings[setting_index, , drop = FALSE]
+      target <- targets$target[setting_index]
+      for (treated_count in design$treated_sizes) {
+        cell_index <- cell_index + 1L
+        cell_completed <- 0L
+        last_progress <- proc.time()[["elapsed"]]
+        message(sprintf("Running cell %d/%d: %s, n1=%d, n0=%d (%d runs)",
+                        cell_index, planned_cells, setting$setting,
+                        treated_count, design$control_multiplier * treated_count,
+                        design$replications))
+        record_result <- function(replicate, value) {
+          # Store by task ID, not completion order, to keep serial and parallel
+          # output identical. Only this short state update defers interrupts.
+          suspendInterrupts({
+            task <- (cell_index - 1L) * design$replications + replicate
+            state$rows[task] <- list(value)
+            state$completed <- state$completed + 1L
+            cell_completed <<- cell_completed + 1L
+          })
+          now <- proc.time()[["elapsed"]]
+          if (cell_completed == 1L || cell_completed == design$replications ||
+              now - last_progress >= 5) {
+            message(sprintf(
+              "Completed %d/%d in cell %d/%d; %d/%d datasets overall; elapsed %.1f min (replicate %d).",
+              cell_completed, design$replications, cell_index, planned_cells,
+              state$completed, planned_replications, (now - started) / 60,
+              replicate
+            ))
+            last_progress <<- now
+          }
+        }
+        run_simulation_replications(
+          design$replications, run_replication,
+          arguments = list(setting = setting, treated_count = treated_count,
+                           target = target, design = design),
+          cluster = cluster, on_result = record_result
+        )
+      }
+    }
+  }, interrupt = function(condition) {
+    state$status <- "interrupted"
+    state$condition <- conditionMessage(condition)
+  }, error = function(condition) {
+    state$status <- "failed"
+    state$condition <- conditionMessage(condition)
+  })
+
+  completed_rows <- Filter(Negate(is.null), state$rows)
+  if (length(completed_rows)) {
+    results <- do.call(rbind, completed_rows)
+    rownames(results) <- NULL
+    summary <- summarize_scenario2_results(results, settings)
+    print(summary, row.names = FALSE, digits = 4)
+    if (any(summary$failed > 0L)) {
+      message("Some fits failed; inspect the error column in the individual simulation results.")
+    }
+  } else {
+    results <- make_result(settings[1L, , drop = FALSE],
+                           design$treated_sizes[1L], 1L, "", NA_real_, design)[0, ]
+    summary <- results[, c("setting", "kappa_pi", "kappa_m", "n1", "n0",
+                           "method"), drop = FALSE]
+    for (name in c("replications", "successful", "failed")) {
+      summary[[name]] <- integer()
+    }
+    for (name in c("coverage", "bias", "rmse")) summary[[name]] <- numeric()
+  }
+  execution$status <- state$status
+  execution$completed_replications <- state$completed
+  execution$planned_replications <- planned_replications
+  execution$elapsed_seconds <- unname(proc.time()[["elapsed"]] - started)
+  if (!is.null(state$condition)) execution$condition <- state$condition
   metadata <- list(design = design, settings = settings,
                    quick_run = options$quick_run, targets = targets,
                    execution = execution, session = utils::sessionInfo())
-
-  result_cells <- list()
-  cell_index <- 0L
-  for (setting_index in seq_len(nrow(settings))) {
-    setting <- settings[setting_index, , drop = FALSE]
-    target <- targets$target[setting_index]
-    for (treated_count in design$treated_sizes) {
-      control_count <- design$control_multiplier * treated_count
-      message(sprintf("Running %s: n1=%d, n0=%d (%d runs)",
-                      setting$setting, treated_count, control_count,
-                      design$replications))
-      cell_rows <- run_simulation_replications(
-        design$replications, run_replication,
-        arguments = list(setting = setting, treated_count = treated_count,
-                         target = target, design = design),
-        cluster = cluster
-      )
-      cell_results <- do.call(rbind, cell_rows)
-      message("Completed cell.")
-      cell_index <- cell_index + 1L
-      result_cells[[cell_index]] <- cell_results
-    }
-  }
-
-  results <- do.call(rbind, result_cells)
-  summary <- summarize_scenario2_results(results, settings)
-  print(summary, row.names = FALSE, digits = 4)
-  if (any(summary$failed > 0L)) {
-    warning("Some fits failed; inspect the error column in the individual simulation results.",
-            call. = FALSE)
-  }
-  invisible(list(replications = results, summary = summary,
+  message(sprintf("Scenario 2 %s: %d/%d completed datasets retained in memory.",
+                  state$status, state$completed, planned_replications))
+  if (state$status == "failed") message("Execution error: ", state$condition)
+  invisible(list(status = state$status, replications = results, summary = summary,
                  targets = targets, metadata = metadata))
 }
 
@@ -418,9 +499,15 @@ scenario2_summary <- scenario2_results$summary
 scenario2_replications <- scenario2_results$replications
 scenario2_targets <- scenario2_results$targets
 
-# Keep every run in R; display the complete aggregated results.
-scenario2_display <- build_simulation_report(scenario2_results, "Scenario 2")
+# Keep completed runs in R, including partial results after an interruption.
+scenario2_display <- if (nrow(scenario2_replications)) {
+  build_simulation_report(scenario2_results, "Scenario 2")
+} else {
+  list(tables = list(), report = NULL)
+}
 scenario2_tables <- scenario2_display$tables
 scenario2_report <- scenario2_display$report
-show_simulation_report(scenario2_report)
-plot_scenario2_results(scenario2_summary, settings)
+if (!is.null(scenario2_report)) {
+  show_simulation_report(scenario2_report)
+  plot_scenario2_results(scenario2_summary, settings)
+}

@@ -255,9 +255,11 @@ ml_fit <- fit_mec_cox(
 `ps_learner = "bart"` is also available for nonlinear source-propensity
 estimation, including the fits in the [Scenario 2 study
 script](inst/reproduce/scenario2.R). BART tree count, posterior draws,
-burn-in, and shrinkage are explicit arguments. The package does not
-automatically tune BART; the study script records its settings in the
-run metadata.
+burn-in, and shrinkage are explicit arguments. The default API uses fixed
+BART settings. Scenario 2 selects `nuisance_settings = "original_study"`
+to use the original study's small-subset BART tuning and randomized survival
+forests. Its settings are recorded in the run metadata. Completed datasets
+are reported during execution and retained in memory after interruption.
 
 MEC-Cox uses positive Kullback–Leibler calibrated weights. The stored
 `basis`, `ps_oof`, `survival_oof`, `base_weights`, and `weights` make its
@@ -292,7 +294,7 @@ From the parent directory, run:
 
 ```sh
 R CMD build mecCox
-R CMD check mecCox_0.1.0.tar.gz --no-manual
+R CMD check mecCox_0.1.1.tar.gz --no-manual
 ```
 
 The tests compare ATT-IPW output with the manuscript implementation and with

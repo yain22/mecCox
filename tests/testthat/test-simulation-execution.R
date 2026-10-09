@@ -480,3 +480,220 @@ testthat::test_that("failed worker initialization restores environment and socke
   testthat::expect_setequal(rownames(showConnections(all = TRUE)),
                             previous_connections)
 })
+
+testthat::test_that("completion callbacks preserve serial and socket RNG results", {
+  testthat::skip_on_cran()
+  draw <- function(replicate, seed) {
+    # Different runtimes exercise receiving results out of task order.
+    if (replicate == 1L) Sys.sleep(0.15)
+    set.seed(seed + replicate)
+    list(replicate = replicate, draws = stats::rnorm(3L))
+  }
+  environment(draw) <- baseenv()
+  serial_received <- list()
+  serial <- simulation_helpers$run_simulation_replications(
+    5L, draw, list(seed = 341L),
+    on_result = function(replicate, value) {
+      serial_received[[as.character(replicate)]] <<- value
+    }
+  )
+  cluster <- simulation_helpers$start_simulation_cluster(2L, character())
+  on.exit(simulation_helpers$stop_simulation_cluster(cluster), add = TRUE)
+  socket_received <- list()
+  concurrent <- simulation_helpers$run_simulation_replications(
+    5L, draw, list(seed = 341L), cluster = cluster,
+    on_result = function(replicate, value) {
+      socket_received[[as.character(replicate)]] <<- value
+    }
+  )
+  testthat::expect_identical(concurrent, serial)
+  testthat::expect_identical(unname(serial_received), serial)
+  testthat::expect_setequal(names(socket_received), as.character(1:5))
+  testthat::expect_identical(unname(socket_received[as.character(1:5)]), serial)
+})
+
+testthat::test_that("socket interruption preserves already received completions", {
+  testthat::skip_on_cran()
+  previous_connections <- rownames(showConnections(all = TRUE))
+  cluster <- simulation_helpers$start_simulation_cluster(2L, character())
+  on.exit(simulation_helpers$stop_simulation_cluster(cluster), add = TRUE)
+  received <- list()
+  draw <- function(replicate) replicate
+  environment(draw) <- baseenv()
+  interrupted <- tryCatch({
+    simulation_helpers$run_simulation_replications(
+      6L, draw, list(), cluster = cluster,
+      on_result = function(replicate, value) {
+        received[[as.character(replicate)]] <<- value
+        if (length(received) == 2L) {
+          stop(structure(list(message = "test interruption", call = NULL),
+                         class = c("interrupt", "condition")))
+        }
+      }
+    )
+    FALSE
+  }, interrupt = function(condition) TRUE)
+  testthat::expect_true(interrupted)
+  testthat::expect_length(received, 2L)
+  testthat::expect_identical(as.integer(names(received)), unlist(received,
+                                                               use.names = FALSE))
+  simulation_helpers$stop_simulation_cluster(cluster)
+  cluster <- NULL
+  testthat::expect_setequal(rownames(showConnections(all = TRUE)),
+                            previous_connections)
+})
+
+scenario2_execution_fixture <- function(interrupt_at = NA_integer_) {
+  execution <- new.env(parent = simulation_helpers)
+  expressions <- as.list(parse(file.path(dirname(helper_path), "scenario2.R")))
+  for (expression in expressions) {
+    if (is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+        is.call(expression[[3L]]) &&
+        identical(expression[[3L]][[1L]], as.name("function"))) {
+      eval(expression, execution)
+    }
+  }
+  execution$compute_reference_target <- function(...) 0
+  execution$options <- list(quick_run = TRUE, cores = 1L, replications = 4L)
+  execution$design <- list(replications = 4L, treated_sizes = c(2L, 3L),
+                            control_multiplier = 4L)
+  execution$settings <- data.frame(setting_id = 1L, setting = "None",
+                                   kappa_pi = 0, kappa_m = 0)
+  execution$interrupt_at <- interrupt_at
+  execution$interrupt_n1 <- 2L
+  execution$run_replication <- function(setting, treated_count, replicate,
+                                         target, design) {
+    if (!is.na(interrupt_at) && replicate == interrupt_at &&
+        treated_count == interrupt_n1) {
+      stop(structure(list(message = "test interruption", call = NULL),
+                     class = c("interrupt", "condition")))
+    }
+    make_result(setting, treated_count, replicate, "MEC-Cox (BART/Cox)",
+                 target, design, estimate = 0.1, standard_error = 0.2)
+  }
+  environment(execution$run_replication) <- execution
+  execution$expressions <- expressions
+  execution
+}
+
+testthat::test_that("Scenario 2 returns partial results on interruption without files", {
+  scratch <- tempfile("simulation interrupt ")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  previous_directory <- setwd(scratch)
+  on.exit(setwd(previous_directory), add = TRUE)
+  execution <- scenario2_execution_fixture(interrupt_at = 3L)
+  messages <- character()
+  output <- capture.output(answer <- withCallingHandlers(
+    execution$run_scenario2(execution$design, execution$settings,
+                            execution$options),
+    message = function(condition) {
+      messages <<- c(messages, conditionMessage(condition))
+      invokeRestart("muffleMessage")
+    }
+  ))
+  testthat::expect_identical(answer$status, "interrupted")
+  testthat::expect_identical(answer$replications$replicate, 1:2)
+  testthat::expect_equal(answer$summary$replications, 2L)
+  testthat::expect_equal(answer$summary$successful, 2L)
+  testthat::expect_identical(answer$metadata$execution$completed_replications, 2L)
+  testthat::expect_equal(answer$metadata$execution$planned_replications, 8L)
+  testthat::expect_equal(answer$targets$target, 0)
+  testthat::expect_true(any(grepl("2 cells; 4 runs per cell = 8 datasets",
+                                 messages, fixed = TRUE)))
+  testthat::expect_true(any(grepl("Completed 1/4", messages, fixed = TRUE)))
+  testthat::expect_true(any(grepl("interrupted: 2/8", messages, fixed = TRUE)))
+  testthat::expect_length(list.files(scratch, all.files = TRUE, no.. = TRUE), 0L)
+})
+
+testthat::test_that("Scenario 2 exposes empty results without reporting after an interrupt", {
+  execution <- scenario2_execution_fixture(interrupt_at = 1L)
+  execution$build_simulation_report <- function(...) stop("must not build report")
+  execution$show_simulation_report <- function(...) stop("must not show report")
+  execution$plot_scenario2_results <- function(...) stop("must not plot results")
+  result_index <- which(vapply(execution$expressions, function(expression) {
+    is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+      identical(expression[[2L]], as.name("scenario2_results"))
+  }, logical(1)))
+  for (expression in execution$expressions[result_index:length(execution$expressions)]) {
+    invisible(capture.output(suppressMessages(eval(expression, execution))))
+  }
+  testthat::expect_identical(execution$scenario2_results$status, "interrupted")
+  testthat::expect_equal(nrow(execution$scenario2_replications), 0L)
+  testthat::expect_equal(nrow(execution$scenario2_summary), 0L)
+  testthat::expect_named(execution$scenario2_replications,
+                         c("setting", "kappa_pi", "kappa_m", "n1", "n0",
+                           "replicate", "method", "target", "estimate",
+                           "standard_error", "error"))
+  testthat::expect_null(execution$scenario2_report)
+  testthat::expect_identical(execution$scenario2_tables, list())
+})
+
+testthat::test_that("partial reports identify incomplete simulation results", {
+  execution <- scenario2_execution_fixture(interrupt_at = 2L)
+  invisible(capture.output(answer <- suppressMessages(execution$run_scenario2(
+    execution$design, execution$settings, execution$options
+  ))))
+  report <- simulation_helpers$build_simulation_report(answer, "Scenario 2")
+  html <- htmltools::renderTags(report$report)$html
+  testthat::expect_match(html, "partial results", fixed = TRUE)
+  testthat::expect_match(html, "interrupted; 1 of 8 planned datasets", fixed = TRUE)
+})
+
+testthat::test_that("interruption retains completed cells and the current partial cell", {
+  execution <- scenario2_execution_fixture(interrupt_at = 3L)
+  execution$interrupt_n1 <- 3L
+  invisible(capture.output(answer <- suppressMessages(execution$run_scenario2(
+    execution$design, execution$settings, execution$options
+  ))))
+  testthat::expect_identical(answer$status, "interrupted")
+  testthat::expect_identical(answer$replications$n1, c(rep(2L, 4L), rep(3L, 2L)))
+  testthat::expect_identical(answer$replications$replicate, c(1:4, 1:2))
+  testthat::expect_equal(answer$summary$replications, c(4L, 2L))
+  testthat::expect_identical(answer$metadata$execution$completed_replications, 6L)
+})
+
+testthat::test_that("partial Scenario 2 plots omit unstarted settings", {
+  execution <- scenario2_execution_fixture(interrupt_at = 2L)
+  invisible(capture.output(answer <- suppressMessages(execution$run_scenario2(
+    execution$design, execution$settings, execution$options
+  ))))
+  settings <- rbind(execution$settings,
+                     data.frame(setting_id = 2L, setting = "Not started",
+                                 kappa_pi = 1, kappa_m = 2))
+  grDevices::pdf(NULL, width = 14, height = 12)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  testthat::expect_no_error(
+    simulation_helpers$plot_scenario2_results(answer$summary, settings)
+  )
+})
+
+testthat::test_that("unexpected Scenario 2 errors also retain prior results", {
+  execution <- scenario2_execution_fixture()
+  execution$run_replication <- function(setting, treated_count, replicate,
+                                         target, design) {
+    if (replicate == 3L) stop("test replication failure")
+    make_result(setting, treated_count, replicate, "MEC-Cox (BART/Cox)",
+                 target, design, estimate = 0.1, standard_error = 0.2)
+  }
+  environment(execution$run_replication) <- execution
+  invisible(capture.output(answer <- suppressMessages(execution$run_scenario2(
+    execution$design, execution$settings, execution$options
+  ))))
+  testthat::expect_identical(answer$status, "failed")
+  testthat::expect_identical(answer$replications$replicate, 1:2)
+  testthat::expect_match(answer$metadata$execution$condition,
+                         "test replication failure", fixed = TRUE)
+})
+
+testthat::test_that("cluster cleanup tolerates a broken owned socket", {
+  testthat::skip_on_cran()
+  previous_connections <- rownames(showConnections(all = TRUE))
+  cluster <- simulation_helpers$start_simulation_cluster(2L, character())
+  on.exit(simulation_helpers$stop_simulation_cluster(cluster), add = TRUE)
+  close(cluster[[1L]]$con)
+  testthat::expect_no_error(simulation_helpers$stop_simulation_cluster(cluster))
+  cluster <- NULL
+  testthat::expect_setequal(rownames(showConnections(all = TRUE)),
+                            previous_connections)
+})

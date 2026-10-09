@@ -32,7 +32,7 @@
   )
 }
 
-.att_cox_score <- function(theta, prepared, weights) {
+.att_cox_score <- function(theta, prepared, weights, individual = TRUE) {
   source <- prepared$A
   observed_time <- prepared$time
   event <- prepared$delta
@@ -57,11 +57,13 @@
   risk_mean_at_subject <- treated_risk_total[time_position] /
     risk_total[time_position]
   direct_contribution <- weights * event * (source - risk_mean_at_subject)
+  score <- sum(direct_contribution)
 
-  event_times <- sort(unique(observed_time[event == 1L]))
-  if (length(event_times) == 0L) {
+  if (!any(event == 1L)) {
     stop("At least one event is required to fit the Cox model.", call. = FALSE)
   }
+  if (!individual) return(list(score = score))
+  event_times <- sort(unique(observed_time[event == 1L]))
 
   # The event mass is the sum of case weights at a tied event time.  This is
   # the Breslow convention used by survival::coxph(ties = "breslow").
@@ -95,7 +97,7 @@
   individual_contribution <- direct_contribution - risk_set_contribution
 
   list(
-    score = sum(direct_contribution),
+    score = score,
     individual_contribution = individual_contribution
   )
 }
@@ -208,7 +210,7 @@ fit_att_ipw_cox <- function(data, time, event, source, covariates,
   cox_score <- .att_cox_score(theta, prepared, weights)
   theta_derivative <- .att_central_difference(
     function(candidate) {
-      .att_cox_score(candidate[1], prepared, weights)$score
+      .att_cox_score(candidate[1], prepared, weights, individual = FALSE)$score
     },
     theta
   )[1]
@@ -227,7 +229,7 @@ fit_att_ipw_cox <- function(data, time, event, source, covariates,
       candidate_weights <- .att_weights_for_gamma(
         candidate_gamma, design_matrix, prepared$A, ps_clip
       )$weights
-      .att_cox_score(theta, prepared, candidate_weights)$score
+      .att_cox_score(theta, prepared, candidate_weights, individual = FALSE)$score
     },
     gamma
   )

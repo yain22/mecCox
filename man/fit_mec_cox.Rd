@@ -29,6 +29,10 @@ fit_mec_cox(
   rsf_num_trees = 500L,
   rsf_min_node_size = 15L,
   rsf_auto_tune = TRUE,
+  ps_predictions = NULL,
+  nuisance_settings = c("standard", "original_study"),
+  bart_auto_tune = NULL,
+  ml_tune_n = 100L,
   ...
 )
 }
@@ -65,12 +69,48 @@ is not supplied.}
 
 \item{mlp_hidden_units, mlp_epochs}{MLP architecture and training epochs.}
 
-\item{bart_num_trees, bart_posterior_draws, bart_burn_in, bart_shrinkage}{Fixed BART training settings; this function does not tune BART.}
+\item{bart_num_trees, bart_posterior_draws, bart_burn_in, bart_shrinkage}{BART training settings, used directly when tuning is disabled or as
+fallbacks if tuning fails. The standard defaults are 100 trees, 1000
+posterior draws, 500 burn-in draws, and shrinkage 2. Under
+\code{nuisance_settings = "original_study"}, unspecified values instead use
+50 trees, 200 posterior draws, and 100 burn-in draws, with shrinkage 2.}
 
 \item{rsf_num_trees, rsf_min_node_size}{Random survival forest controls.}
 
 \item{rsf_auto_tune}{If \code{TRUE}, select the RSF \code{mtry} and minimum node size
 within each training fold using a source-control training/validation split.}
+
+\item{ps_predictions}{Optional numeric vector of out-of-fold source
+probabilities, one per row of \code{data}, strictly inside (0, 1). Supplying this
+vector skips propensity fitting and applies \code{ps_trim} as usual. The caller
+must ensure the predictions use the same rows, row order, covariates, and
+source-stratified folds defined by \code{n_folds} and \code{seed}. To reuse a previous
+fit's \code{ps_oof} when changing the survival learner, keep these inputs and
+\code{ps_trim} unchanged; earlier clipping cannot be undone. This function checks
+the vector's length and values, not its training provenance.}
+
+\item{nuisance_settings}{Learner configuration. \code{"standard"} retains the
+general-purpose settings. \code{"original_study"} uses the lightweight tuning
+and forest controls from the original two-outcome-learner simulation:
+source-balanced BART tuning on at most \code{ml_tune_n} rows with a 70/30
+stratified split; and RSF tuning on the first at most \code{ml_tune_n} controls
+with a 50/50 event-stratified split. The RSF uses extremely randomized
+splits, one candidate split, sampling without replacement at fraction
+0.632, and 100 trees after successful tuning (300 trees by default without
+tuning or if tuning fails). The preset retains this package's deterministic
+fold seeds, posterior averaging of BART probabilities, and correctly
+oriented mortality concordance; it does not reproduce the original
+script's latent-score averaging or orientation-free concordance.}
+
+\item{bart_auto_tune}{Whether to choose BART tree count from 25, 50, and 100
+using held-out log loss within each training fold. Candidates and the final
+selected fit use 100 posterior draws and 50 burn-in draws; shrinkage stays
+at \code{bart_shrinkage}. \code{NULL} enables tuning for \code{"original_study"} and
+disables it for \code{"standard"}. Set \code{FALSE} to use the supplied BART controls.}
+
+\item{ml_tune_n}{Maximum subset size for BART tuning and for RSF tuning under
+\code{"original_study"}. Standard RSF tuning continues to use all training-fold
+controls. Tuning subsets never include the held-out cross-fitting fold.}
 
 \item{...}{Reserved; unsupported arguments cause an error.}
 }
@@ -81,6 +121,9 @@ weights, out-of-fold predictions, calibration basis, fold assignments,
 model fits, and calibration and weight diagnostics. The working sandwich
 accounts for estimation of the calibration multiplier but treats the
 cross-fitted nuisance learners as fixed.
+\code{propensity_tuning} and \code{outcome_fits} record the fold-specific learner
+parameters and tuning results. Supplied propensity predictions have no
+recorded propensity-training metadata.
 }
 \description{
 External-control source-propensity odds are normalized to the target sample
