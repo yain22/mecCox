@@ -1,34 +1,47 @@
 # Execution helpers shared by the two simulation reproduction scripts.
 # The scientific generators and fitting calls remain in each scenario script.
 
-parse_simulation_arguments <- function(default_output,
-                                       arguments = commandArgs(trailingOnly = TRUE)) {
-  output_option <- grep("^--output=", arguments, value = TRUE)
+parse_simulation_arguments <- function(arguments = character(),
+                                       quick_run = FALSE, cores = 20L,
+                                       replications = 1000L) {
   cores_option <- grep("^--cores=", arguments, value = TRUE)
-  unknown <- arguments[!grepl("^(--quick|--output=.+|--cores=[0-9]+)$",
+  replications_option <- grep("^--replications=", arguments, value = TRUE)
+  unknown <- arguments[!grepl("^(--quick|--cores=[0-9]+|--replications=[0-9]+)$",
                               arguments)]
-  if (length(unknown) || length(output_option) > 1L ||
+  if (length(unknown) || length(replications_option) > 1L ||
       length(cores_option) > 1L || sum(arguments == "--quick") > 1L) {
-    stop("Use --quick, one --output=directory, and one --cores=positive_integer.",
+    stop("Use --quick, one --cores=positive_integer, and ",
+         "one --replications=positive_integer. Results are not saved to files.",
          call. = FALSE)
   }
-
-  cores <- 20L
+  if (!is.logical(quick_run) || length(quick_run) != 1L || is.na(quick_run)) {
+    stop("quick_run must be TRUE or FALSE.", call. = FALSE)
+  }
   if (length(cores_option)) {
-    value <- as.double(sub("^--cores=", "", cores_option))
-    if (!is.finite(value) || value < 1 || value > .Machine$integer.max) {
-      stop("--cores must be a positive integer.", call. = FALSE)
-    }
-    cores <- as.integer(value)
+    cores <- as.double(sub("^--cores=", "", cores_option))
   }
-  output_directory <- if (length(output_option)) {
-    sub("^--output=", "", output_option)
-  } else {
-    default_output
+  cores <- simulation_positive_integer(cores, "cores")
+  explicit_replications <- length(replications_option) > 0L
+  if (explicit_replications) {
+    replications <- as.double(sub("^--replications=", "", replications_option))
+  }
+  replications <- simulation_positive_integer(replications, "replications")
+  quick_run <- quick_run || "--quick" %in% arguments
+  # Keep --quick short unless the user has chosen a different count in the
+  # configuration block or has supplied an explicit command-line count.
+  if (quick_run && !explicit_replications && replications == 1000L) {
+    replications <- 2L
   }
 
-  list(quick_run = "--quick" %in% arguments,
-       output_directory = output_directory, cores = cores)
+  list(quick_run = quick_run, cores = cores, replications = replications)
+}
+
+simulation_positive_integer <- function(value, name) {
+  if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+      value < 1 || value != floor(value) || value > .Machine$integer.max) {
+    stop(name, " must be a positive integer.", call. = FALSE)
+  }
+  as.integer(value)
 }
 
 choose_worker_count <- function(requested_cores, replications) {
@@ -96,8 +109,131 @@ run_simulation_replications <- function(replications, replication_function,
   }
 }
 
-# Without an output_file, draw on the current graphics device.
-plot_scenario1_results <- function(summary, output_file = NULL) {
+check_simulation_display_packages <- function() {
+  packages <- c("kableExtra", "htmltools", "rstudioapi")
+  installed <- vapply(packages, requireNamespace, logical(1), quietly = TRUE)
+  if (any(!installed)) {
+    stop("The simulation tables require: ",
+         paste(packages[!installed], collapse = ", "),
+         ". Install these packages before starting the simulation.",
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+format_simulation_table <- function(data, title) {
+  check_simulation_display_packages()
+  table <- kableExtra::kbl(
+    data, format = "html", digits = 4, row.names = FALSE,
+    caption = title, col.names = gsub("_", " ", names(data), fixed = TRUE),
+    escape = TRUE
+  )
+  table <- kableExtra::kable_styling(
+    table, bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE, position = "left", font_size = 14
+  )
+  table <- kableExtra::row_spec(table, 0L, bold = TRUE,
+                               color = "white", background = "#285579")
+  if (nrow(data) > 20L) {
+    table <- kableExtra::scroll_box(table, width = "100%", height = "520px")
+  } else {
+    table <- kableExtra::scroll_box(table, width = "100%")
+  }
+  table
+}
+
+build_simulation_report <- function(results, title) {
+  check_simulation_display_packages()
+  if (is.data.frame(results$targets)) {
+    targets <- results$targets
+    if ("target" %in% names(targets)) targets$target_hr <- exp(targets$target)
+  } else {
+    targets <- data.frame(target_log_hr = results$metadata$target,
+                           target_hr = exp(results$metadata$target))
+  }
+  configuration_values <- c(list(quick_run = results$metadata$quick_run),
+                             results$metadata$design,
+                             results$metadata$execution)
+  configuration <- data.frame(
+    setting = names(configuration_values),
+    value = vapply(configuration_values, function(value) {
+      paste(as.character(value), collapse = ", ")
+    }, character(1)),
+    stringsAsFactors = FALSE
+  )
+  tables <- list(
+    summary = format_simulation_table(results$summary,
+                                      paste(title, "simulation summary")),
+    targets = format_simulation_table(targets,
+                                      paste(title, "reference target(s)")),
+    configuration = format_simulation_table(configuration,
+                                             paste(title, "run configuration"))
+  )
+  if (is.data.frame(results$metadata$settings)) {
+    tables$settings <- format_simulation_table(results$metadata$settings,
+                                                paste(title, "settings"))
+  }
+  content <- lapply(tables, function(table) {
+    htmltools::tags$section(htmltools::HTML(as.character(table)))
+  })
+  report <- htmltools::browsable(htmltools::tagList(
+    htmltools::tags$head(
+      htmltools::tags$title(title),
+      htmltools::tags$style(htmltools::HTML(paste(
+        "body { font-family: Arial, sans-serif; color: #222; padding: 20px; }",
+        "h1 { font-size: 24px; margin-bottom: 8px; }",
+        "section { margin: 26px 0; }",
+        "table { border-collapse: collapse; margin-bottom: 12px; }",
+        "caption { font-size: 17px; font-weight: bold; text-align: left;",
+        "padding: 10px 0; color: #222; }",
+        "th, td { padding: 8px 12px; border-bottom: 1px solid #ddd;",
+        "white-space: nowrap; }",
+        "tbody tr:nth-child(even) { background: #f5f7fa; }",
+        "tbody tr:hover { background: #eaf1f7; }"
+      )))
+    ),
+    htmltools::tags$h1(title),
+    htmltools::tags$p(
+      "The complete aggregated results are shown below. Individual ",
+      "replication records remain available in the R session."
+    ),
+    content
+  ))
+  list(tables = tables, report = report)
+}
+
+show_simulation_report <- function(report, viewer = NULL) {
+  if (is.null(viewer)) {
+    if (!interactive()) return(invisible(FALSE))
+    viewer <- getOption("viewer")
+    if (!is.function(viewer) && rstudioapi::isAvailable()) {
+      viewer <- rstudioapi::viewer
+    }
+    if (!is.function(viewer)) {
+      message("The formatted tables are retained in the *_tables and ",
+              "*_report objects. Use RStudio to display them in its Viewer.")
+      return(invisible(FALSE))
+    }
+  }
+  if (!is.function(viewer)) {
+    stop("viewer must be a function or NULL.", call. = FALSE)
+  }
+  # html_print uses a temporary HTML document for the Viewer, not a results
+  # folder. The simulation does not write CSV, RDS, or PDF output.
+  htmltools::html_print(report, viewer = viewer)
+  invisible(TRUE)
+}
+
+simulation_graphics_available <- function() {
+  if (grDevices::dev.cur() != 1L || interactive()) return(TRUE)
+  message("Plots require an active graphics device. Source this script in ",
+          "RStudio or a graphical R session to display them; no PDF is saved.")
+  FALSE
+}
+
+# Draw on the active R graphics device; never open a file graphics device.
+plot_scenario1_results <- function(summary) {
+  if (!simulation_graphics_available()) return(invisible(FALSE))
   methods <- c("Naive", "Robust sandwich", "Corrected sandwich", "MEC-Cox")
   colors <- c("gray25", "#0072B2", "#009E73", "#D55E00")
   line_types <- c(3L, 2L, 4L, 1L)
@@ -105,9 +241,6 @@ plot_scenario1_results <- function(summary, output_file = NULL) {
   metrics <- c(coverage = "Coverage", bias = "Bias", rmse = "RMSE")
   ratios <- unique(summary$ratio)
 
-  if (!is.null(output_file)) {
-    grDevices::pdf(output_file, width = 14, height = 3.1 * length(ratios) + 2.5)
-  }
   old <- graphics::par(no.readonly = TRUE)
   panel_count <- 3L * length(ratios)
   panel_layout <- matrix(seq_len(panel_count), ncol = 3L, byrow = TRUE)
@@ -118,10 +251,9 @@ plot_scenario1_results <- function(summary, output_file = NULL) {
                        oma = c(0, 0, 1.5, 0), las = 1)
   on.exit({
     graphics::par(old)
-    if (!is.null(output_file)) grDevices::dev.off()
   }, add = TRUE)
   device_size <- grDevices::dev.size("in")
-  if (is.null(output_file) && (device_size[1L] < 5 || device_size[2L] < 4)) {
+  if (device_size[1L] < 5 || device_size[2L] < 4) {
     # Keep all panels visible in a small RStudio plot pane.
     plot_scale <- min(1, device_size[1L] / 5, device_size[2L] / 4)
     graphics::par(mar = c(3, 3.2, 2.2, 0.6), oma = c(0, 0, 0.8, 0),
@@ -162,7 +294,8 @@ plot_scenario1_results <- function(summary, output_file = NULL) {
                    horiz = TRUE, bty = "n", cex = 0.85)
 }
 
-plot_scenario2_results <- function(summary, settings, output_file = NULL) {
+plot_scenario2_results <- function(summary, settings) {
+  if (!simulation_graphics_available()) return(invisible(FALSE))
   methods <- c("Naive", "Robust sandwich", "Corrected sandwich",
                "MEC-Cox (BART/Cox)", "MEC-Cox (BART/RSF)")
   colors <- c("gray25", "#0072B2", "#009E73", "#D55E00", "#CC79A7")
@@ -170,9 +303,6 @@ plot_scenario2_results <- function(summary, settings, output_file = NULL) {
   symbols <- c(4L, 1L, 2L, 16L, 17L)
   metrics <- c(coverage = "Coverage", bias = "Bias", rmse = "RMSE")
 
-  if (!is.null(output_file)) {
-    grDevices::pdf(output_file, width = 14, height = 11.8)
-  }
   old <- graphics::par(no.readonly = TRUE)
   panel_layout <- matrix(seq_len(9L), ncol = 3L, byrow = TRUE)
   panel_layout <- rbind(panel_layout, rep(10L, 3L))
@@ -181,10 +311,9 @@ plot_scenario2_results <- function(summary, settings, output_file = NULL) {
                        oma = c(0, 0, 1.5, 0), las = 1)
   on.exit({
     graphics::par(old)
-    if (!is.null(output_file)) grDevices::dev.off()
   }, add = TRUE)
   device_size <- grDevices::dev.size("in")
-  if (is.null(output_file) && (device_size[1L] < 5 || device_size[2L] < 4)) {
+  if (device_size[1L] < 5 || device_size[2L] < 4) {
     # Keep all panels visible in a small RStudio plot pane.
     plot_scale <- min(1, device_size[1L] / 5, device_size[2L] / 4)
     graphics::par(mar = c(3, 3.2, 2.2, 0.6), oma = c(0, 0, 0.8, 0),

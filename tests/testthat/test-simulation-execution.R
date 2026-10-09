@@ -11,34 +11,69 @@ source(helper_path, local = simulation_helpers)
 
 testthat::test_that("simulation arguments have useful defaults and reject mistakes", {
   parse_arguments <- simulation_helpers$parse_simulation_arguments
-  defaults <- parse_arguments("example-output", character())
+  defaults <- parse_arguments()
   testthat::expect_identical(
     defaults,
-    list(quick_run = FALSE, output_directory = "example-output", cores = 20L)
+    list(quick_run = FALSE, cores = 20L, replications = 1000L)
   )
-  testthat::expect_identical(
-    parse_arguments(NULL, character()),
-    list(quick_run = FALSE, output_directory = NULL, cores = 20L)
-  )
+  wrapper <- new.env(parent = simulation_helpers)
+  wrapper$commandArgs <- function(...) "--unrelated-wrapper-option"
+  isolated_parser <- parse_arguments
+  environment(isolated_parser) <- wrapper
+  testthat::expect_identical(isolated_parser(), defaults)
 
   chosen <- parse_arguments(
-    "example-output", c("--quick", "--cores=2", "--output=a folder")
+    c("--quick", "--cores=2", "--replications=7")
   )
   testthat::expect_identical(
     chosen,
-    list(quick_run = TRUE, output_directory = "a folder", cores = 2L)
+    list(quick_run = TRUE, cores = 2L, replications = 7L)
+  )
+  testthat::expect_identical(
+    parse_arguments(quick_run = TRUE, cores = 3L, replications = 11L),
+    list(quick_run = TRUE, cores = 3L, replications = 11L)
+  )
+  testthat::expect_identical(
+    parse_arguments(c("--cores=2", "--replications=5"),
+                    cores = 3L, replications = 11L),
+    list(quick_run = FALSE, cores = 2L, replications = 5L)
   )
 
   invalid_arguments <- list(
     "--cores=0", "--cores=-1", "--cores=1.5", "--cores=NaN",
-    "--cores=Inf", "--cores=", "--cores=2147483648", "--output=",
+    "--cores=Inf", "--cores=", "--cores=2147483648",
+    "--replications=0", "--replications=-1", "--replications=1.5",
+    "--replications=NaN", "--replications=Inf", "--replications=",
+    "--replications=2147483648", "--output=", "--output=example-output",
     "--unknown", c("--cores=1", "--cores=2"),
-    c("--output=a", "--output=b"), c("--quick", "--quick")
+    c("--replications=2", "--replications=3"), c("--quick", "--quick")
   )
   for (arguments in invalid_arguments) {
-    testthat::expect_error(parse_arguments("example-output", arguments),
-                           "cores|Use")
+    testthat::expect_error(parse_arguments(arguments), "cores|replications|Use")
   }
+})
+
+testthat::test_that("quick checks retain explicitly selected replication counts", {
+  parse_arguments <- simulation_helpers$parse_simulation_arguments
+  testthat::expect_identical(parse_arguments("--quick")$replications, 2L)
+  testthat::expect_identical(
+    parse_arguments(quick_run = TRUE)$replications, 2L
+  )
+  testthat::expect_identical(
+    parse_arguments("--quick", replications = 9L)$replications, 9L
+  )
+  testthat::expect_identical(
+    parse_arguments(c("--quick", "--replications=1000"))$replications, 1000L
+  )
+  testthat::expect_identical(
+    parse_arguments("--replications=4", quick_run = TRUE,
+                    replications = 9L)$replications, 4L
+  )
+  testthat::expect_error(parse_arguments(cores = 0L), "cores")
+  testthat::expect_error(parse_arguments(replications = 0L), "replications")
+  testthat::expect_error(parse_arguments(replications = 1.5), "replications")
+  testthat::expect_error(parse_arguments(replications = NA_integer_),
+                         "replications")
 })
 
 testthat::test_that("both scripts can be sourced from another working directory", {
@@ -70,8 +105,7 @@ testthat::test_that("both scripts can be sourced from another working directory"
     source(script_copy, local = execution)
     testthat::expect_identical(
       execution$options,
-      list(quick_run = FALSE, output_directory = NULL,
-           cores = 20L)
+      list(quick_run = FALSE, cores = 20L, replications = 1000L)
     )
     testthat::expect_identical(
       normalizePath(execution$helper_candidates[1L]),
@@ -81,13 +115,29 @@ testthat::test_that("both scripts can be sourced from another working directory"
     # Settings edited in the file also work with RStudio's Source/chdir mode.
     startup[[1L]] <- quote(quick_run <- TRUE)
     startup[[2L]] <- quote(cores <- 2L)
-    startup[[3L]] <- quote(output_directory <- "quick output")
+    startup[[3L]] <- quote(replications <- 7L)
     writeLines(unlist(lapply(startup, deparse)), script_copy)
     source(script_copy, local = execution, chdir = TRUE)
     testthat::expect_identical(
       execution$options,
-      list(quick_run = TRUE, output_directory = "quick output", cores = 2L)
+      list(quick_run = TRUE, cores = 2L, replications = 7L)
     )
+
+    # Reduced quick-run designs still use the count edited by the user.
+    design_index <- which(vapply(expressions, function(expression) {
+      is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+        identical(expression[[2L]], as.name("design"))
+    }, logical(1)))
+    first_function <- which(vapply(expressions, function(expression) {
+      is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
+        is.call(expression[[3L]]) &&
+        identical(expression[[3L]][[1L]], as.name("function"))
+    }, logical(1)))[1L]
+    design_expressions <- expressions[seq.int(design_index, first_function - 1L)]
+    for (expression in design_expressions) {
+      suppressMessages(eval(expression, envir = execution))
+    }
+    testthat::expect_identical(execution$design$replications, 7L)
   }
 })
 
@@ -142,7 +192,7 @@ testthat::test_that("simulation plots preserve the active graphics device", {
   testthat::expect_identical(grDevices::dev.cur(), device)
   testthat::expect_equal(graphics::par(names(old)), old)
 
-  # RStudio panes can be much smaller than the optional publication PDF.
+  # RStudio panes can be much smaller than an explicitly opened device.
   grDevices::dev.off()
   grDevices::pdf(NULL, width = 4, height = 3)
   device <- grDevices::dev.cur()
@@ -158,6 +208,94 @@ testthat::test_that("simulation plots preserve the active graphics device", {
   simulation_helpers$plot_scenario2_results(second_summary, settings)
   testthat::expect_identical(grDevices::dev.cur(), device)
   testthat::expect_equal(graphics::par(names(old)), old)
+})
+
+testthat::test_that("headless plotting does not open an automatic PDF device", {
+  scratch <- tempfile("simulation headless ")
+  dir.create(scratch)
+  script <- tempfile("simulation headless check ", fileext = ".R")
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  on.exit(unlink(script), add = TRUE)
+  writeLines(c(
+    "arguments <- commandArgs(trailingOnly = TRUE)",
+    "setwd(arguments[2L])",
+    "helpers <- new.env(parent = baseenv())",
+    "source(arguments[1L], local = helpers)",
+    "stopifnot(grDevices::dev.cur() == 1L)",
+    "first <- data.frame(ratio = '1:2', n1 = 200L, method = 'MEC-Cox',",
+    "                    coverage = 0.95, bias = 0, rmse = 0.1)",
+    "second <- data.frame(setting = 'None', n1 = 200L,",
+    "                     method = 'MEC-Cox (BART/Cox)',",
+    "                     coverage = 0.95, bias = 0, rmse = 0.1)",
+    "first_drawn <- helpers$plot_scenario1_results(first)",
+    "second_drawn <- helpers$plot_scenario2_results(",
+    "  second, data.frame(setting = 'None'))",
+    "stopifnot(identical(first_drawn, FALSE), identical(second_drawn, FALSE),",
+    "          grDevices::dev.cur() == 1L,",
+    "          length(list.files('.', all.files = TRUE, no.. = TRUE)) == 0L)",
+    "cat('Headless plots left no files.\\n')"
+  ), script)
+
+  executable <- file.path(R.home("bin"),
+                          if (.Platform$OS.type == "windows") {
+                            "Rscript.exe"
+                          } else "Rscript")
+  output <- system2(executable,
+                    c("--vanilla", shQuote(script), shQuote(helper_path),
+                      shQuote(scratch)), stdout = TRUE, stderr = TRUE)
+  testthat::expect_null(attr(output, "status"))
+  testthat::expect_true(any(grepl("Headless plots left no files", output,
+                                 fixed = TRUE)))
+  testthat::expect_length(list.files(scratch, all.files = TRUE, no.. = TRUE), 0L)
+})
+
+testthat::test_that("simulation summaries are formatted HTML tables", {
+  testthat::skip_if_not_installed("kableExtra")
+  summary <- data.frame(
+    ratio = "1:2", n1 = 200L, n0 = 400L, method = "MEC-Cox",
+    replications = 1000L, successful = 1000L, failed = 0L,
+    coverage = 0.956789, bias = 0.0123456, rmse = 0.1234567
+  )
+  table <- simulation_helpers$format_simulation_table(
+    summary, "Scenario 1: simulation summary"
+  )
+  testthat::expect_s3_class(table, "kableExtra")
+  html <- paste(as.character(table), collapse = "\n")
+  testthat::expect_match(html, "<table")
+  testthat::expect_match(html, "Scenario 1: simulation summary", fixed = TRUE)
+  testthat::expect_match(html, "MEC-Cox", fixed = TRUE)
+  testthat::expect_match(html, "coverage", ignore.case = TRUE)
+  testthat::expect_false(grepl("0.956789", html, fixed = TRUE))
+})
+
+testthat::test_that("simulation reports invoke the Viewer using temporary HTML", {
+  testthat::skip_if_not_installed("kableExtra")
+  testthat::skip_if_not_installed("htmltools")
+  scratch <- tempfile("simulation viewer ")
+  dir.create(scratch)
+  on.exit(unlink(scratch, recursive = TRUE), add = TRUE)
+  previous_directory <- setwd(scratch)
+  on.exit(setwd(previous_directory), add = TRUE)
+
+  table <- simulation_helpers$format_simulation_table(
+    data.frame(Method = "MEC-Cox", Coverage = 0.95), "Simulation summary"
+  )
+  report <- htmltools::tagList(htmltools::h1("Scenario 1"),
+                               htmltools::HTML(as.character(table)))
+  viewed_path <- NULL
+  viewed_html <- NULL
+  viewer <- function(path) {
+    viewed_path <<- normalizePath(path, winslash = "/", mustWork = TRUE)
+    viewed_html <<- paste(readLines(path, warn = FALSE), collapse = "\n")
+  }
+  shown <- simulation_helpers$show_simulation_report(report, viewer = viewer)
+  testthat::expect_true(shown)
+  testthat::expect_type(viewed_path, "character")
+  testthat::expect_true(startsWith(viewed_path,
+                                  normalizePath(tempdir(), winslash = "/")))
+  testthat::expect_match(viewed_html, "Scenario 1", fixed = TRUE)
+  testthat::expect_match(viewed_html, "<table")
+  testthat::expect_length(list.files(scratch, all.files = TRUE, no.. = TRUE), 0L)
 })
 
 testthat::test_that("simulation drivers retain results without creating files", {
@@ -179,8 +317,7 @@ testthat::test_that("simulation drivers retain results without creating files", 
       }
     }
     execution$compute_reference_target <- function(...) 0
-    execution$options <- list(quick_run = TRUE, cores = 1L,
-                               output_directory = NULL)
+    execution$options <- list(quick_run = TRUE, cores = 1L, replications = 1L)
     execution$design <- list(replications = 1L, treated_sizes = 2L,
                               control_multipliers = 2L, control_multiplier = 4L)
     execution$settings <- data.frame(setting_id = 1L, setting = "None",
@@ -203,7 +340,8 @@ testthat::test_that("simulation drivers retain results without creating files", 
     # Run the script's final assignments, with cheap deterministic fits, so
     # the test checks the real driver and the objects exposed to the user.
     result_names <- paste0(scenario, c("_results", "_summary", "_replications",
-                                       "_targets"))
+                                       "_targets", "_display", "_tables",
+                                       "_report"))
     for (expression in expressions) {
       if (is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
           as.character(expression[[2L]]) %in% result_names) {
@@ -218,6 +356,17 @@ testthat::test_that("simulation drivers retain results without creating files", 
                                answer$summary)
     testthat::expect_identical(execution[[paste0(scenario, "_replications")]],
                                answer$replications)
+    testthat::expect_identical(answer$metadata$design$replications, 1L)
+    tables <- execution[[paste0(scenario, "_tables")]]
+    expected_tables <- c("summary", "targets", "configuration")
+    if (scenario == "scenario2") expected_tables <- c(expected_tables, "settings")
+    testthat::expect_setequal(names(tables), expected_tables)
+    for (table in tables) testthat::expect_s3_class(table, "kableExtra")
+    report <- execution[[paste0(scenario, "_report")]]
+    report_html <- htmltools::renderTags(report)$html
+    testthat::expect_match(report_html, "simulation summary", fixed = TRUE)
+    testthat::expect_match(report_html, "reference target", fixed = TRUE)
+    testthat::expect_match(report_html, "run configuration", fixed = TRUE)
     testthat::expect_length(list.files(scratch, all.files = TRUE, no.. = TRUE), 0L)
   }
 })

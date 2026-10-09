@@ -5,12 +5,12 @@
 # --quick exercises all three settings with a deliberately reduced workload.
 # In the R console or RStudio, edit the three settings below, then source this
 # file (or run it from the editor). Rscript arguments override these settings.
-# Results stay in R, with plots and a summary viewer. Set output_directory to
-# a folder path only when you also want CSV, metadata, and PDF files.
+# Results stay in R, with formatted tables in the RStudio Viewer and plots in
+# the active graphics window. The script does not save result files.
 
 quick_run <- FALSE
 cores <- 20L
-output_directory <- NULL
+replications <- 1000L
 
 # source() records the current file in an `ofile` frame. Selected lines in an
 # editor have no such frame, so also look in the working directory and package.
@@ -37,7 +37,7 @@ if (!length(helper_candidates)) {
        call. = FALSE)
 }
 source(helper_candidates[1L], local = TRUE)
-if (!exists("plot_scenario2_results", mode = "function", inherits = FALSE)) {
+if (!exists("build_simulation_report", mode = "function", inherits = FALSE)) {
   stop("Update mecCox or keep the current simulation_helpers.R beside ",
        "scenario2.R before starting the simulation.", call. = FALSE)
 }
@@ -48,13 +48,10 @@ arguments <- if (interactive() || length(source_files)) {
 } else {
   commandArgs(trailingOnly = TRUE)
 }
-if (!any(grepl("^--cores=", arguments))) {
-  arguments <- c(arguments, paste0("--cores=", cores))
-}
-if (quick_run && !"--quick" %in% arguments) {
-  arguments <- c(arguments, "--quick")
-}
-options <- parse_simulation_arguments(output_directory, arguments)
+options <- parse_simulation_arguments(
+  arguments, quick_run = quick_run, cores = cores, replications = replications
+)
+check_simulation_display_packages()
 
 suppressPackageStartupMessages({
   library(mecCox)
@@ -73,7 +70,7 @@ if (length(missing_packages)) {
 
 design <- list(
   seed = 20260427L,
-  replications = 1000L,
+  replications = options$replications,
   treated_sizes = c(200L, 250L, 300L, 350L, 400L),
   control_multiplier = 4L,
   covariate_count = 10L,
@@ -103,7 +100,6 @@ settings <- data.frame(
 )
 
 if (options$quick_run) {
-  design$replications <- 2L
   design$treated_sizes <- 200L
   design$super_treated <- 2000L
   design$super_controls <- 4000L
@@ -112,7 +108,7 @@ if (options$quick_run) {
   design$bart_burn_in <- 25L
   design$rsf_num_trees <- 100L
   design$rsf_auto_tune <- FALSE
-  message("Quick check: all three settings, reduced replications, target ",
+  message("Quick check: all three settings, reduced workload, target ",
           "sample, and tree workloads. Do not cite as a paper result.")
 }
 
@@ -353,11 +349,6 @@ summarize_scenario2_results <- function(results, settings) {
 }
 
 run_scenario2 <- function(design, settings, options) {
-  output_directory <- options$output_directory
-  save_output <- !is.null(output_directory)
-  if (save_output) {
-    dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
-  }
   worker_count <- choose_worker_count(options$cores, design$replications)
   export_names <- c("source_probability", "draw_source_covariates",
                     "control_log_hazard", "draw_observed_data", "make_result",
@@ -387,11 +378,6 @@ run_scenario2 <- function(design, settings, options) {
   metadata <- list(design = design, settings = settings,
                    quick_run = options$quick_run, targets = targets,
                    execution = execution, session = utils::sessionInfo())
-  if (save_output) {
-    saveRDS(metadata, file.path(output_directory, "run_metadata.rds"))
-    utils::write.csv(targets, file.path(output_directory, "reference_targets.csv"),
-                     row.names = FALSE)
-  }
 
   result_cells <- list()
   cell_index <- 0L
@@ -410,12 +396,6 @@ run_scenario2 <- function(design, settings, options) {
         cluster = cluster
       )
       cell_results <- do.call(rbind, cell_rows)
-      if (save_output) {
-        checkpoint <- sprintf("checkpoint_setting-%d_n1-%d_n0-%d.csv",
-                              setting$setting_id, treated_count, control_count)
-        utils::write.csv(cell_results, file.path(output_directory, checkpoint),
-                         row.names = FALSE)
-      }
       message("Completed cell.")
       cell_index <- cell_index + 1L
       result_cells[[cell_index]] <- cell_results
@@ -424,21 +404,10 @@ run_scenario2 <- function(design, settings, options) {
 
   results <- do.call(rbind, result_cells)
   summary <- summarize_scenario2_results(results, settings)
-  if (save_output) {
-    utils::write.csv(results, file.path(output_directory, "replications.csv"),
-                     row.names = FALSE)
-    utils::write.csv(summary, file.path(output_directory, "summary.csv"),
-                     row.names = FALSE)
-    plot_scenario2_results(summary, settings,
-                           file.path(output_directory, "scenario2.pdf"))
-  }
   print(summary, row.names = FALSE, digits = 4)
   if (any(summary$failed > 0L)) {
     warning("Some fits failed; inspect the error column in the replication results.",
             call. = FALSE)
-  }
-  if (save_output) {
-    message("Results written to: ", normalizePath(output_directory))
   }
   invisible(list(replications = results, summary = summary,
                  targets = targets, metadata = metadata))
@@ -449,9 +418,9 @@ scenario2_summary <- scenario2_results$summary
 scenario2_replications <- scenario2_results$replications
 scenario2_targets <- scenario2_results$targets
 
-# Keep the completed results available even if a display window cannot open.
-if (interactive()) {
-  utils::View(scenario2_replications, title = "Scenario 2: replication results")
-  utils::View(scenario2_summary, title = "Scenario 2: simulation summary")
-  plot_scenario2_results(scenario2_summary, settings)
-}
+# Keep every replication in R; display the complete aggregated results.
+scenario2_display <- build_simulation_report(scenario2_results, "Scenario 2")
+scenario2_tables <- scenario2_display$tables
+scenario2_report <- scenario2_display$report
+show_simulation_report(scenario2_report)
+plot_scenario2_results(scenario2_summary, settings)

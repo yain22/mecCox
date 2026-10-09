@@ -93,6 +93,12 @@ learners before running this script:
 install.packages(c("dbarts", "ranger"))
 ```
 
+Both scripts use HTML tables from `kableExtra` for their results display:
+
+```r
+install.packages(c("kableExtra", "htmltools", "rstudioapi"))
+```
+
 Run either script with RStudio's **Source** button, or from the R console:
 
 ```r
@@ -106,27 +112,36 @@ configuration block near the top:
 ```r
 quick_run <- FALSE
 cores <- 20L
-output_directory <- NULL
+replications <- 1000L
 ```
 
-**The default is a full simulation, with no files saved.** In interactive R
-or RStudio, the summary table opens with `View()` and the figure appears on
-the active graphics device (the **Plots** pane in RStudio). The results also
-remain in the R session:
+Edit `replications` to choose the number of Monte Carlo replications per
+design cell, and edit `cores` to choose the maximum number of workers.
+**The scripts display results and keep them in memory; they do not export
+result files.** In RStudio, a formatted HTML report opens in the **Viewer**
+pane, with the complete simulation summary, reference targets, and run
+settings. The figure appears on the active graphics device, normally the
+**Plots** pane. The results also remain in the R session:
 
 ```r
 scenario1_summary       # coverage, bias, RMSE, and fit counts
 scenario1_replications  # individual estimates and standard errors
 scenario1_results       # replications, summary, and run metadata
+scenario1_tables        # named list of formatted HTML tables
+scenario1_report        # HTML report shown in the Viewer
 ```
 
 Scenario 2 creates `scenario2_summary`, `scenario2_replications`,
-`scenario2_results`, and `scenario2_targets`. To run a short check first, open
-the script with `file.edit(script)`, set `quick_run <- TRUE` and `cores <- 2L`
-in its configuration block, save the edit, and source the script. When using
-downloaded copies, keep `simulation_helpers.R` in the same folder.
+`scenario2_results`, `scenario2_targets`, `scenario2_tables`, and
+`scenario2_report`. Individual replication rows remain available in R; the
+Viewer report presents the aggregated results rather than thousands of raw
+rows. To run a short check first, open the script with `file.edit(script)`,
+set `quick_run <- TRUE`, `cores <- 2L`, and `replications <- 2L` in its
+configuration block, then source the edited script. When using downloaded
+copies, keep `simulation_helpers.R` in the same folder.
 
-Each full run fits 15,000 simulated datasets and can take substantial time.
+At the default 1,000 replications, each full run fits 15,000 simulated
+datasets and can take substantial time.
 Replications run in parallel with up to 20 workers by default, capped by the
 number of detected logical cores and replications. Edit `cores` to choose
 a smaller worker count, or set `cores <- 1L` for a serial run. The socket-based
@@ -138,20 +153,22 @@ You can also run the scripts from a terminal:
 ```sh
 Rscript mecCox/inst/reproduce/scenario1.R --quick --cores=2
 Rscript mecCox/inst/reproduce/scenario2.R --quick --cores=2
+Rscript mecCox/inst/reproduce/scenario1.R --cores=20 --replications=100
 ```
 
-Without a graphical R session, these commands print the summary table to the
-console. They do not save results by default. Omit `--quick` for a full run.
-The quick run uses two replications per retained design cell, one treated
-sample size, and a smaller superpopulation reference; Scenario 2 also reduces
+Without a graphical R session, the scripts print their tables to the console;
+run them in RStudio to display the HTML report and plots. Command-line
+`--replications=N` must be a positive integer and overrides the replication
+setting in the script. The quick run defaults to two replications per
+retained design cell when the replication setting remains at 1,000 and no
+count is supplied on the command line. A nondefault configured count or an
+explicit `--replications` count is retained. Quick mode uses one treated
+sample size and a smaller superpopulation reference; Scenario 2 also reduces
 the BART and RSF settings and retains all three nonlinearity settings. These
 runs check the code path and are not estimates from the paper's simulation.
 
-Saving is optional: set `output_directory <- "scenario1-output"` inside the
-script, or add `--output=scenario1-output` to an `Rscript` command. This writes
-the CSV tables, checkpoints, run metadata, and PDF figure to that directory.
 The [reproduction notes](inst/reproduce/README.md) describe the exact
-generators, output objects, and optional saved files.
+generators, in-memory objects, and display options.
 
 ## Methods and interpretation
 
