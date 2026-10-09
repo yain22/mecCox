@@ -41,18 +41,17 @@
 }
 
 .breast_folds <- function(source, n_folds, seed) {
-  .breast_with_seed(seed, {
-    fold <- integer(length(source))
-    for (a in c(0L, 1L)) {
-      rows <- which(source == a)
-      fold[rows] <- sample(rep(seq_len(n_folds), length.out = length(rows)))
-    }
-    fold
-  })
+  set.seed(as.integer(seed))
+  fold <- integer(length(source))
+  for (a in c(0L, 1L)) {
+    rows <- which(source == a)
+    fold[rows] <- sample(rep(seq_len(n_folds), length.out = length(rows)))
+  }
+  fold
 }
 
 .breast_propensity <- function(training, validation, covariates, learner,
-                              seed, mlp_epochs) {
+                              mlp_epochs) {
   if (learner == "glm") {
     fit <- stats::glm(stats::reformulate(covariates, response = "A"),
                       data = training, family = stats::binomial())
@@ -82,13 +81,14 @@
       torch::torch_set_num_threads(previous_threads)
     }, add = TRUE)
     torch::torch_set_num_threads(2L)
-    torch::torch_manual_seed(as.integer(seed))
-    fit <- .breast_with_seed(seed, brulee::brulee_mlp(
+    # brulee draws its initialization seed and validation rows from the
+    # study's R random stream, continuing after fold assignment or RSF tuning.
+    fit <- brulee::brulee_mlp(
       A ~ ., data = train_frame, hidden_units = c(32L, 16L),
       activation = "relu", dropout = 0.1, penalty = 1e-3,
       epochs = as.integer(mlp_epochs), learn_rate = 0.01,
       batch_size = min(256L, nrow(train_frame)), stop_iter = 10L,
-      verbose = FALSE))
+      verbose = FALSE)
     prediction <- as.numeric(stats::predict(
       fit, new_data = valid_frame, type = "prob")[[".pred_1"]])
   }
@@ -125,12 +125,11 @@
     mtry = sort(unique(pmax(1, c(floor(sqrt(length(covariates))),
                                 ceiling(length(covariates) / 2))))),
     min.node.size = c(15L, 30L))
-  train_rows <- .breast_with_seed(seed, {
-    event_rows <- which(controls$delta == 1L)
-    censor_rows <- which(controls$delta == 0L)
-    sort(c(sample(event_rows, floor(0.6 * length(event_rows))),
-           sample(censor_rows, floor(0.6 * length(censor_rows)))))
-  })
+  set.seed(as.integer(seed))
+  event_rows <- which(controls$delta == 1L)
+  censor_rows <- which(controls$delta == 0L)
+  train_rows <- sort(c(sample(event_rows, floor(0.6 * length(event_rows))),
+                      sample(censor_rows, floor(0.6 * length(censor_rows)))))
   validation <- controls[-train_rows, , drop = FALSE]
   if (nrow(validation) < 10L || sum(validation$delta) < 3L)
     return(list(mtry = max(1, floor(sqrt(length(covariates)))),
@@ -268,6 +267,9 @@ fit_breast_mec <- function(data, covariates, ps_learner = c("glm", "mlp"),
                            seed = 20260427L, n_folds = 10L,
                            n_landmarks = 20L, mlp_epochs = 200L,
                            rsf_auto_tune = TRUE) {
+  # Preserve the caller's RNG state around the complete study fit, while
+  # retaining the continuous random sequence used by its successive learners.
+  .breast_with_seed(seed, {
   ps_learner <- match.arg(ps_learner)
   survival_learner <- match.arg(survival_learner)
   data <- as.data.frame(data)
@@ -296,7 +298,7 @@ fit_breast_mec <- function(data, covariates, ps_learner = c("glm", "mlp"),
     training <- data[fold != k, , drop = FALSE]
     validation <- data[fold == k, , drop = FALSE]
     propensity[fold == k] <- .breast_propensity(
-      training, validation, covariates, ps_learner, seed + k, mlp_epochs)
+      training, validation, covariates, ps_learner, mlp_epochs)
     prediction <- if (survival_learner == "cox") {
       .breast_cox_survival(training, validation, covariates, landmarks)
     } else {
@@ -348,4 +350,5 @@ fit_breast_mec <- function(data, covariates, ps_learner = c("glm", "mlp"),
                             sum(weights[controls]^2),
                           cv = stats::sd(weights[controls]) /
                             mean(weights[controls])))
+  })
 }
