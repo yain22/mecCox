@@ -17,14 +17,15 @@ the simulation instructions.
 
 ## Simulation dependencies
 
-`scenario1.R` and `scenario2.R` rerun the two main-paper simulation designs
-with the exported `mecCox` fitting functions. Install the package first, for
+`scenario1.R` and `scenario2.R` run the two main-paper simulation designs
+with the study fitting functions and fixed configurations. Install the package first, for
 example with `R CMD INSTALL mecCox` from the checkout's parent directory.
 Both scripts use `kableExtra`, `htmltools`, and `rstudioapi` to present HTML
-tables. Scenario 2 also requires the optional learners `dbarts` and `ranger`:
+tables, and `rngtools` for deterministic random-stream allocation.
+Scenario 2 also requires the optional learners `dbarts` and `ranger`:
 
 ```r
-install.packages(c("kableExtra", "htmltools", "rstudioapi"))
+install.packages(c("kableExtra", "htmltools", "rstudioapi", "rngtools"))
 # Also install these learners for Scenario 2:
 install.packages(c("dbarts", "ranger"))
 ```
@@ -87,9 +88,10 @@ file instead. Edit the settings **inside the script** before sourcing it:
 values assigned only in the console are replaced by its configuration block.
 
 An absolute script path works from any working directory; use forward slashes
-in R paths on Windows. The helper is found from the sourced file's location,
-the current project, or the installed package. If using downloaded copies,
-keep `simulation_helpers.R` beside both scenario scripts.
+in R paths on Windows. Helpers are found from the sourced file's location
+or the installed package. When downloading files, keep the complete
+`inst/reproduce` directory together, including `simulation_helpers.R`,
+`original_study_helpers.R`, and the `study_reference` subdirectory.
 
 ## Run simulations from a terminal
 
@@ -137,11 +139,33 @@ Rscript mecCox/inst/reproduce/scenario1.R --cores=8
 ```
 
 The PSOCK backend works on Windows, macOS, and Linux. A worker pool is reused
-across design cells. Only Monte Carlo runs execute in parallel; reference
-target computation, summaries, HTML tables, and plots run in the main R
-process. Each run receives its own deterministic seed, so changing
-worker count or scheduling preserves its data and fits in the same R and
-package environment.
+across design cells. Monte Carlo runs execute in parallel; summaries, HTML
+tables, and plots run in the main R process. Reference targets are read from
+the study configurations. Each dataset receives the L'Ecuyer random
+stream allocated by the sample-size-first job grid.
+Changing worker count or scheduling therefore preserves its data and fits
+in the same R and package environment.
+
+## Study implementation
+
+The `study_reference` directory contains the fitting functions and
+configurations for Figures 4 and 5. The scripts use fixed cross-fitting and
+forest seeds, study-specific tuning, and a `1.96` confidence-limit multiplier.
+Summary metrics include finite estimates with finite standard errors. Thus
+1,000 runs means 1,000 attempted datasets per cell; successful counts are
+reported separately. Implementation identifiers are available in the result
+metadata.
+
+**BART score extraction.** The study functions average latent predictions
+and use a range-based probability check; otherwise they apply
+`pnorm(raw + binary_offset)`. In `dbarts` 0.9-32, `yhat.test` already
+includes `binaryOffset`, so that branch adds the offset twice. This is a
+known limitation of the study calculation, not a general-purpose posterior
+probability estimator. The documented posterior probability mean is
+`colMeans(pnorm(fit$yhat.test))`.
+
+The study environment used R 4.5.1, `dbarts` 0.9-32, `ranger` 0.17.0,
+and `survival` 3.8-3. Numerical results may vary with software versions.
 
 ## Scenario 1: linear source selection and prognosis
 
@@ -163,9 +187,9 @@ the logarithms of `1.75, 1.75, 1.60, 1.60, 1.50` and five copies of `1.25`.
 Independent exponential censoring has rate `0.0008`. The common reference
 target is the ATT-weighted marginal Cox projection, approximated using 30,000
 treated and 60,000 external-control superpopulation observations, **not**
-the conditional coefficient `log(0.70)`. With the stated seed, the full-size
-reference target is approximately `-0.2237787` on the log-hazard-ratio scale;
-the short `--quick` run deliberately uses a smaller reference population.
+the conditional coefficient `log(0.70)`. The saved reference target is
+approximately `-0.2237787` on the log-hazard-ratio scale. The scripts use that
+saved target in both full and quick runs.
 
 The three ATT-IPW rows share the same weighted Cox coefficient and differ
 only in their naive, robust sandwich, or corrected sandwich standard error.
@@ -178,9 +202,8 @@ clipped to `[0.01, 0.99]` when constructing analysis weights. Both methods
 use a Breslow weighted Cox fit.
 
 The short `--quick` run retains `n1 = 200` and `n0/n1 = 2`, with two
-runs unless a different count is selected, and a reference population
-of 2,000 treated and 4,000 external controls. It retains all 50 covariates,
-ten folds, and five landmarks.
+runs unless a different count is selected. It retains the study's target,
+all 50 covariates, ten folds, and five landmarks.
 
 ## Scenario 2: increasing nonlinearity
 
@@ -208,13 +231,12 @@ r_m <- 0.45 * sin(X2) + 0.35 * (X3^2 - 1) +
 ```
 
 The remaining event-time, censoring, probability-clipping, and landmark
-settings follow Scenario 1. Reference targets are computed separately for
-each nonlinearity setting using 30,000 treated and 60,000 external controls.
+settings follow Scenario 1. Saved reference targets were computed separately
+for each nonlinearity setting using 30,000 treated and 60,000 external controls.
 The three logistic ATT-IPW comparators still share one point estimate. The
 two MEC-Cox variants use cross-fitted BART source
 probabilities and either Cox or RSF control-survival predictions, with ten
-folds and five landmarks. The full script uses the original study's lightweight
-tuning configuration (`nuisance_settings = "original_study"`). Within each
+folds and five landmarks. The script uses lightweight tuning. Within each
 training fold, BART selects 25, 50, or 100 trees using a source-balanced tuning
 subset of at most 100 patients. Candidate and selected fits use 100 posterior
 draws, 50 burn-in iterations, and shrinkage parameter 2. If tuning cannot be
@@ -223,23 +245,14 @@ iterations.
 
 RSF tuning uses at most 100 external controls, split approximately equally
 into training and validation sets. It selects `mtry` and minimum node size
-from the original nine-candidate grid, with 100 trees. Forests use randomized
+from a nine-candidate grid, with 100 trees. Forests use randomized
 splits (`extratrees`), one candidate split per variable, and a 63.2% sample
 without replacement. The fallback is 300 trees and minimum node size 15.
-The two MEC-Cox variants use the same BART settings, folds, and seeds, so
-their source-propensity predictions agree. The script and metadata record
-the learner settings.
-The script fits these BART predictions once per dataset and reuses them for
-the second survival learner. Unused training predictions and OOB error
-calculations are omitted. More workers also require more memory; reduce
+The two MEC-Cox variants use fixed folds and tuning seeds. RSF tuning uses
+orientation-free `max(C, 1 - C)` concordance criterion. Final forest fits use
+the fixed study seed. The script and metadata record the
+implementation and settings. More workers also require more memory; reduce
 `cores` if concurrent fits exhaust available RAM.
-
-This restores the study's computational settings, not identical historical
-numbers. The package averages BART posterior probability draws and uses
-directional mortality-risk concordance for RSF tuning; the original code
-transformed averaged latent predictions and used an orientation-free
-concordance criterion. Seeds and fitting sequences also differ. Numerical
-results can therefore differ from those underlying the paper's figure.
 
 Scenario 2 reports completed datasets while it runs. If interrupted, it
 returns the results already received from workers in `scenario2_results`,
@@ -249,12 +262,10 @@ objects you need before restarting R. Worker shutdown does not forcibly
 terminate a native learner that is still computing.
 
 The short `--quick` run keeps all three nonlinearity settings, but uses
-`n1 = 200`, two runs per setting unless a different count is selected,
-and reference populations of 2,000 treated and 4,000 external controls.
-It uses 25 BART trees, 50 posterior
-draws, 25 burn-in iterations, and 100 RSF trees without tuning. Ten-fold
-cross-fitting and five landmarks are retained. It exercises both MEC-Cox
-variants. Quick-run results cannot establish simulation performance.
+`n1 = 200` and two runs per setting unless a different count is selected.
+It retains BART/RSF tuning, ten-fold cross-fitting, five
+landmarks, and saved reference targets. Both MEC-Cox variants are fitted.
+Quick-run results cannot establish simulation performance.
 
 ## Public breast-cancer case study
 
@@ -395,10 +406,7 @@ missing results when a fit fails.
 
 ## Numerical results
 
-The deterministic seeds make each script rerunnable, but the package API,
-learner tuning, and random-number streams are not a bit-for-bit replay of the
-earlier private parallel code used to produce the paper's figures. The
-package's corrected ATT-IPW sandwich also differentiates the clipped analysis
-weights locally; its values can differ from an earlier correction when fitted
-probabilities cross a clipping boundary. Results should be compared at the
-Monte Carlo level; a quick run cannot establish performance.
+The study scripts specify the simulation designs, fitting procedures, and
+random streams. Numerical results may vary with software versions. Use the
+full design to assess Monte Carlo performance; quick runs check installation
+and execution only.

@@ -97,6 +97,12 @@ testthat::test_that("both scripts can be sourced from another working directory"
     writeLines(unlist(lapply(startup, deparse)), script_copy)
     file.copy(helper_path, file.path(scratch, "simulation_helpers.R"),
               overwrite = TRUE)
+    file.copy(file.path(reproduction_directory, "original_study_helpers.R"),
+              file.path(scratch, "original_study_helpers.R"), overwrite = TRUE)
+    dir.create(file.path(scratch, "study_reference"), showWarnings = FALSE)
+    file.copy(list.files(file.path(reproduction_directory, "study_reference"),
+                          full.names = TRUE),
+              file.path(scratch, "study_reference"), overwrite = TRUE)
 
     execution <- new.env(parent = baseenv())
     execution$commandArgs <- function(trailingOnly = FALSE) {
@@ -126,7 +132,7 @@ testthat::test_that("both scripts can be sourced from another working directory"
     # Reduced quick-run designs still use the count edited by the user.
     design_index <- which(vapply(expressions, function(expression) {
       is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
-        identical(expression[[2L]], as.name("design"))
+        identical(expression[[2L]], as.name("study_engine"))
     }, logical(1)))
     first_function <- which(vapply(expressions, function(expression) {
       is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
@@ -138,6 +144,12 @@ testthat::test_that("both scripts can be sourced from another working directory"
       suppressMessages(eval(expression, envir = execution))
     }
     testthat::expect_identical(execution$design$replications, 7L)
+    testthat::expect_equal(execution$design$folds, 10L)
+    testthat::expect_equal(execution$design$landmarks, 5L)
+    testthat::expect_equal(execution$design$treated_sizes, 200L)
+    testthat::expect_equal(nrow(execution$study_streams[[1L]]$grid), 35L)
+    testthat::expect_equal(execution$study_streams[[1L]]$grid$job_id[
+      execution$study_streams[[1L]]$grid$n1 == 200L], seq(1L, 31L, by = 5L))
   }
 })
 
@@ -316,11 +328,13 @@ testthat::test_that("simulation drivers retain results without creating files", 
         eval(expression, envir = execution)
       }
     }
-    execution$compute_reference_target <- function(...) 0
+    execution$study_configs <- list(`2` = list(theta_true = 0),
+                                     none = list(theta_true = 0))
+    execution$study_reference <- list()
     execution$options <- list(quick_run = TRUE, cores = 1L, replications = 1L)
     execution$design <- list(replications = 1L, treated_sizes = 2L,
                               control_multipliers = 2L, control_multiplier = 4L)
-    execution$settings <- data.frame(setting_id = 1L, setting = "None",
+    execution$settings <- data.frame(setting_id = 1L, setting_key = "none", setting = "None",
                                      kappa_pi = 0, kappa_m = 0)
     if (scenario == "scenario1") {
       execution$run_replication <- function(multiplier, treated_count, replicate,
@@ -553,11 +567,12 @@ scenario2_execution_fixture <- function(interrupt_at = NA_integer_) {
       eval(expression, execution)
     }
   }
-  execution$compute_reference_target <- function(...) 0
+  execution$study_configs <- list(none = list(theta_true = 0))
+  execution$study_reference <- list()
   execution$options <- list(quick_run = TRUE, cores = 1L, replications = 4L)
   execution$design <- list(replications = 4L, treated_sizes = c(2L, 3L),
                             control_multiplier = 4L)
-  execution$settings <- data.frame(setting_id = 1L, setting = "None",
+  execution$settings <- data.frame(setting_id = 1L, setting_key = "none", setting = "None",
                                    kappa_pi = 0, kappa_m = 0)
   execution$interrupt_at <- interrupt_at
   execution$interrupt_n1 <- 2L
@@ -624,7 +639,7 @@ testthat::test_that("Scenario 2 exposes empty results without reporting after an
   testthat::expect_named(execution$scenario2_replications,
                          c("setting", "kappa_pi", "kappa_m", "n1", "n0",
                            "replicate", "method", "target", "estimate",
-                           "standard_error", "error"))
+                           "standard_error", "ci_lower", "ci_upper", "error"))
   testthat::expect_null(execution$scenario2_report)
   testthat::expect_identical(execution$scenario2_tables, list())
 })
@@ -659,7 +674,7 @@ testthat::test_that("partial Scenario 2 plots omit unstarted settings", {
     execution$design, execution$settings, execution$options
   ))))
   settings <- rbind(execution$settings,
-                     data.frame(setting_id = 2L, setting = "Not started",
+                     data.frame(setting_id = 2L, setting_key = "other", setting = "Not started",
                                  kappa_pi = 1, kappa_m = 2))
   grDevices::pdf(NULL, width = 14, height = 12)
   on.exit(grDevices::dev.off(), add = TRUE)

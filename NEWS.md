@@ -1,8 +1,16 @@
+# mecCox 0.1.2
+
+- Provide the Figure 4/5 study configurations and fitting functions with
+  deterministic random streams, fixed reference targets, and successful-fit
+  summaries based on the study confidence limits.
+- Report completed datasets and partial results for both simulation scripts,
+  with implementation identifiers in run metadata.
+- Quick checks reduce the number of datasets and retain study learner settings.
+
 # mecCox 0.1.1
 
-- Restored Scenario 2's original small-subset BART tuning and randomized
-  survival-forest settings. The general fitting API retains its existing
-  defaults; `nuisance_settings = "original_study"` selects the study preset.
+- Added a small-subset BART tuning and randomized survival-forest preset,
+  selected with `nuisance_settings = "original_study"` in the fitting API.
 - Reuse cross-fitted propensity predictions between the two Scenario 2 fits,
   and omit unused learner predictions and derivative influence calculations.
 - Report Scenario 2 progress within cells and retain completed datasets in

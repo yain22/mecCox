@@ -1,4 +1,4 @@
-# Run the paper's first simulation experiment with the public mecCox API.
+# Run the first simulation using the bundled main-paper study engine.
 # Run from any directory after installing mecCox:
 #   Rscript path/to/mecCox/inst/reproduce/scenario1.R
 # A short code-path check is available with --quick; it is not a paper result.
@@ -30,15 +30,19 @@ helper_candidates <- c(
 helper_candidates <- unique(helper_candidates[
   nzchar(helper_candidates) & file.exists(helper_candidates)
 ])
+helper_candidates <- helper_candidates[vapply(dirname(helper_candidates), function(path) {
+  file.exists(file.path(path, "original_study_helpers.R")) &&
+    dir.exists(file.path(path, "study_reference"))
+}, logical(1))]
 if (!length(helper_candidates)) {
-  stop("Cannot find simulation_helpers.R. Keep it beside scenario1.R and ",
-       "use source('path/to/scenario1.R'), or install the current mecCox package.",
-       call. = FALSE)
+  stop("Cannot find the complete simulation helpers. Install the current mecCox ",
+       "package, or keep simulation_helpers.R, original_study_helpers.R, and ",
+       "study_reference beside this script.", call. = FALSE)
 }
 source(helper_candidates[1L], local = TRUE)
+source(file.path(dirname(helper_candidates[1L]), "original_study_helpers.R"), local = TRUE)
 if (!exists("build_simulation_report", mode = "function", inherits = FALSE)) {
-  stop("Update mecCox or keep the current simulation_helpers.R beside ",
-       "scenario1.R before starting the simulation.", call. = FALSE)
+  stop("Update mecCox or download the complete current reproduce folder.", call. = FALSE)
 }
 
 # A sourced file must not interpret arguments belonging to an outer R script.
@@ -52,138 +56,50 @@ options <- parse_simulation_arguments(
 )
 check_simulation_display_packages()
 
-suppressPackageStartupMessages({
-  library(mecCox)
-  library(survival)
-})
+required_packages <- c("mecCox", "survival", "MASS", "rngtools")
+missing_packages <- required_packages[!vapply(
+  required_packages, requireNamespace, logical(1), quietly = TRUE
+)]
+if (length(missing_packages)) {
+  stop("Install these packages before starting: ",
+       paste(missing_packages, collapse = ", "), call. = FALSE)
+}
 
-quick_run <- options$quick_run
-
+# Bundled configurations supply the main-paper study targets and fitting settings.
+study_engine <- get_original_study_engine("scenario1")
+study_reference <- original_study_metadata("scenario1")
+study_keys <- as.character(c(2L, 3L, 4L))
+study_configs <- stats::setNames(lapply(study_keys, function(key) {
+  get_original_study_config("scenario1", key)
+}), study_keys)
+# Create the complete study grid before selecting quick-check jobs.
+# Its order is sample size first within each replicate, as in expand.grid(ss, rep_id).
+study_streams <- lapply(study_configs, original_study_streams,
+                        replicates = options$replications)
+study_config <- study_configs[[1L]]
 design <- list(
-  seed = 20260427L,
+  seed = study_config$seed,
   replications = options$replications,
-  treated_sizes = c(200L, 250L, 300L, 350L, 400L),
-  control_multipliers = c(2L, 3L, 4L),
-  covariate_count = 50L,
-  folds = 10L,
-  landmarks = 5L,
-  super_treated = 30000L,
-  super_controls = 60000L,
-  weibull_scale = 0.00008,
-  weibull_shape = 2,
-  censoring_rate = 0.0008,
-  conditional_log_hr = log(0.70)
+  treated_sizes = study_config$sample_size_n1,
+  control_multipliers = as.integer(study_keys),
+  covariate_count = study_config$p,
+  folds = study_config$Kfold_mec,
+  landmarks = study_config$n_landmarks,
+  weibull_scale = study_config$lambda0,
+  weibull_shape = study_config$eta_shape,
+  censoring_rate = study_config$censor_rate,
+  conditional_log_hr = study_config$beta_cond,
+  engine = "Bundled main-paper study engine",
+  engine_source = study_reference$source_basename,
+  engine_source_sha256 = study_reference$source_sha256,
+  engine_snapshot_sha256 = study_reference$engine_sha256
 )
 
-if (quick_run) {
-  design$treated_sizes <- 200L
+if (options$quick_run) {
+  design$treated_sizes <- study_config$sample_size_n1[1L]
   design$control_multipliers <- 2L
-  design$super_treated <- 2000L
-  design$super_controls <- 4000L
-  message("Quick check: reduced workload and target sample. Do not cite as a paper result.")
-}
-
-# The first five covariates drive source membership. The true probability is
-# clipped for overlap, exactly as in the manuscript's simulation setup.
-source_probability <- function(covariates) {
-  linear_predictor <- -0.2 +
-    0.75 * covariates[, 1L] + 0.75 * covariates[, 2L] +
-    0.65 * covariates[, 3L] + 0.65 * covariates[, 4L] +
-    0.55 * covariates[, 5L]
-  probability <- stats::plogis(linear_predictor)
-  pmin(pmax(probability, 0.02), 0.98)
-}
-
-# Sample from X | A until the requested two cohort sizes have been reached.
-# Keeping the -0.2 source-model intercept fixed is important: the ratios are
-# imposed by sampling, not by retuning the source mechanism.
-draw_source_covariates <- function(treated_count, control_count, dimension) {
-  treated <- matrix(numeric(), nrow = 0L, ncol = dimension)
-  controls <- matrix(numeric(), nrow = 0L, ncol = dimension)
-
-  while (nrow(treated) < treated_count || nrow(controls) < control_count) {
-    batch_count <- max(4000L, 4L * (treated_count + control_count))
-    candidates <- matrix(stats::rnorm(batch_count * dimension),
-                         nrow = batch_count, ncol = dimension)
-    source <- stats::rbinom(batch_count, 1L,
-                            source_probability(candidates))
-    treated <- rbind(treated, candidates[source == 1L, , drop = FALSE])
-    controls <- rbind(controls, candidates[source == 0L, , drop = FALSE])
-  }
-
-  treated <- treated[seq_len(treated_count), , drop = FALSE]
-  controls <- controls[seq_len(control_count), , drop = FALSE]
-  colnames(treated) <- colnames(controls) <- paste0("X", seq_len(dimension))
-  list(treated = treated, controls = controls)
-}
-
-# The first ten covariates have linear prognostic effects; X11--X50 are noise.
-control_log_hazard <- function(covariates) {
-  coefficients <- numeric(ncol(covariates))
-  coefficients[1:10] <- log(c(1.75, 1.75, 1.60, 1.60, 1.50,
-                            rep(1.25, 5L)))
-  as.vector(covariates %*% coefficients)
-}
-
-draw_observed_data <- function(treated_count, control_count, design) {
-  source_covariates <- draw_source_covariates(
-    treated_count, control_count, design$covariate_count
-  )
-  treated <- source_covariates$treated
-  controls <- source_covariates$controls
-
-  draw_event_time <- function(log_hazard) {
-    uniform <- stats::runif(length(log_hazard))
-    (-log(uniform) /
-       (design$weibull_scale * exp(log_hazard)))^(1 / design$weibull_shape)
-  }
-
-  treated_event_time <- draw_event_time(
-    control_log_hazard(treated) + design$conditional_log_hr
-  )
-  control_event_time <- draw_event_time(control_log_hazard(controls))
-  treated_censor_time <- stats::rexp(treated_count, design$censoring_rate)
-  control_censor_time <- stats::rexp(control_count, design$censoring_rate)
-
-  treated_data <- data.frame(
-    source = 1L,
-    time = pmin(treated_event_time, treated_censor_time),
-    event = as.integer(treated_event_time <= treated_censor_time),
-    treated,
-    check.names = FALSE
-  )
-  control_data <- data.frame(
-    source = 0L,
-    time = pmin(control_event_time, control_censor_time),
-    event = as.integer(control_event_time <= control_censor_time),
-    controls,
-    check.names = FALSE
-  )
-  rbind(treated_data, control_data)
-}
-
-# The conditional log-HR is not the benchmark after covariate marginalization.
-# Approximate the ATT-weighted marginal Cox projection with a superpopulation
-# and the *true* source odds, using the same censoring law as the simulation.
-compute_reference_target <- function(design) {
-  set.seed(design$seed)
-  data <- draw_observed_data(
-    design$super_treated, design$super_controls, design
-  )
-  covariates <- as.matrix(data[paste0("X", seq_len(design$covariate_count))])
-  odds <- source_probability(covariates) /
-    (1 - source_probability(covariates))
-  control_rows <- data$source == 0L
-  weights <- rep(1, nrow(data))
-  weights[control_rows] <- design$super_treated * odds[control_rows] /
-    sum(odds[control_rows])
-
-  fit <- survival::coxph(
-    survival::Surv(time, event) ~ source,
-    data = data, weights = weights, ties = "breslow", robust = FALSE,
-    control = survival::coxph.control(timefix = FALSE)
-  )
-  unname(stats::coef(fit)["source"])
+  message("Quick check: fewer datasets and sample-size cells; study learner ",
+          "settings, folds, landmarks, and reference targets are retained.")
 }
 
 make_result <- function(multiplier, treated_count, replicate, method,
@@ -198,68 +114,41 @@ make_result <- function(multiplier, treated_count, replicate, method,
     target = target,
     estimate = estimate,
     standard_error = standard_error,
+    ci_lower = estimate - 1.96 * standard_error,
+    ci_upper = estimate + 1.96 * standard_error,
     error = error,
     stringsAsFactors = FALSE
   )
 }
 
-run_replication <- function(multiplier, treated_count, replicate, target,
-                            design) {
-  # Separate, deterministic seeds keep a rerun stable even if grid order changes.
-  replicate_seed <- design$seed + 100000L * multiplier +
-    100L * treated_count + replicate
-  set.seed(replicate_seed)
-  data <- draw_observed_data(treated_count,
-                             multiplier * treated_count, design)
-  covariates <- paste0("X", seq_len(design$covariate_count))
-
-  ipw <- tryCatch(
-    fit_att_ipw_cox(data, "time", "event", "source", covariates,
-                    ps_clip = c(0.01, 0.99)),
-    error = function(condition) condition
-  )
-  ipw_labels <- c(naive = "Naive", robust = "Robust sandwich",
-                  corrected = "Corrected sandwich")
-  rows <- vector("list", length(ipw_labels) + 1L)
-  if (inherits(ipw, "error")) {
-    for (index in seq_along(ipw_labels)) {
-      rows[[index]] <- make_result(
-        multiplier, treated_count, replicate, ipw_labels[index],
-        target, error = conditionMessage(ipw)
-      )
-    }
-  } else {
-    for (index in seq_along(ipw_labels)) {
-      variance_name <- names(ipw_labels)[index]
-      rows[[index]] <- make_result(
-        multiplier, treated_count, replicate, ipw_labels[index], target,
-        estimate = ipw$theta, standard_error = ipw$se[variance_name]
-      )
-    }
+run_replication <- function(multiplier, treated_count, replicate, target, design) {
+  key <- as.character(multiplier)
+  plan <- study_streams[[key]]
+  job <- which(plan$grid$n1 == treated_count & plan$grid$rep_id == replicate)
+  if (length(job) != 1L) stop("The requested run is not in the study grid.")
+  raw <- fit_original_study_rep(study_engine, study_configs[[key]],
+                                n1 = treated_count, rep_id = replicate,
+                                rng_stream = plan$streams[[job]])
+  methods <- rep(NA_character_, nrow(raw))
+  methods[raw$Method == "ATT-IPW Cox: Naive model-based"] <- "Naive"
+  methods[raw$Method == "ATT-IPW Cox: Lin-Wei"] <- "Robust sandwich"
+  methods[raw$Method == "ATT-IPW Cox: Shu"] <- "Corrected sandwich"
+  methods[grepl("^MEC-Cox:", raw$Method)] <- "MEC-Cox"
+  keep <- !is.na(methods)
+  raw <- raw[keep, , drop = FALSE]
+  methods <- methods[keep]
+  if (!nrow(raw)) stop("The study engine returned no requested method rows.")
+  answer <- make_result(multiplier, treated_count, raw$rep, methods,
+                        raw$theta_true, raw$Estimate, raw$SE, raw$Error)
+  # Keep the study engine's confidence intervals and fit diagnostics.
+  answer$ci_lower <- raw$CI_L
+  answer$ci_upper <- raw$CI_U
+  answer$original_method <- raw$Method
+  answer$original_rng_job <- plan$grid$job_id[job]
+  for (name in c("ESS", "Rel_ESS", "W_CV", "W_Min", "W_Max", "Cal_Grad", "Cal_Converged")) {
+    answer[[name]] <- raw[[name]]
   }
-
-  mec <- tryCatch(
-    fit_mec_cox(
-      data, "time", "event", "source", covariates,
-      ps_learner = "glm", survival_learner = "cox",
-      n_folds = design$folds, n_landmarks = design$landmarks,
-      seed = replicate_seed, ps_trim = c(0.01, 0.99)
-    ),
-    error = function(condition) condition
-  )
-  mec_index <- length(rows)
-  if (inherits(mec, "error")) {
-    rows[[mec_index]] <- make_result(
-      multiplier, treated_count, replicate, "MEC-Cox", target,
-      error = conditionMessage(mec)
-    )
-  } else {
-    rows[[mec_index]] <- make_result(
-      multiplier, treated_count, replicate, "MEC-Cox", target,
-      estimate = mec$theta, standard_error = mec$se
-    )
-  }
-  do.call(rbind, rows)
+  answer
 }
 
 summarize_results <- function(results) {
@@ -268,7 +157,7 @@ summarize_results <- function(results) {
                               drop = TRUE))
   summaries <- lapply(groups, function(group) {
     valid <- is.finite(group$estimate) &
-      is.finite(group$standard_error) & group$standard_error > 0
+      is.finite(group$standard_error)
     successful <- group[valid, , drop = FALSE]
     error <- successful$estimate - successful$target
     result <- group[1L, c("ratio", "n1", "n0", "method")]
@@ -276,7 +165,7 @@ summarize_results <- function(results) {
     result$successful <- nrow(successful)
     result$failed <- nrow(group) - nrow(successful)
     result$coverage <- if (length(error)) mean(
-      abs(error) <= stats::qnorm(0.975) * successful$standard_error
+      successful$target >= successful$ci_lower & successful$target <= successful$ci_upper
     ) else NA_real_
     result$bias <- if (length(error)) mean(error) else NA_real_
     result$rmse <- if (length(error)) sqrt(mean(error^2)) else NA_real_
@@ -291,66 +180,139 @@ summarize_results <- function(results) {
 }
 
 run_scenario1 <- function(design, options) {
+  started <- proc.time()[["elapsed"]]
   worker_count <- choose_worker_count(options$cores, design$replications)
-  message(sprintf("Using %d worker(s); requested %d.",
-                  worker_count, options$cores))
-  message("Computing the ATT Cox-projection reference target ...")
-  target <- compute_reference_target(design)
-  message(sprintf("Reference log-hazard ratio: %.6f", target))
-  execution <- list(requested_cores = options$cores, workers = worker_count,
-                    backend = if (worker_count > 1L) "PSOCK" else "serial",
-                    rng_kind = RNGkind())
-  metadata <- list(design = design, quick_run = options$quick_run, target = target,
-                   execution = execution, session = utils::sessionInfo())
-
-  worker_functions <- c("source_probability", "draw_source_covariates",
-                        "control_log_hazard", "draw_observed_data",
-                        "make_result", "run_replication")
-  cluster <- start_simulation_cluster(
-    worker_count, worker_functions, envir = environment(run_replication)
+  planned_cells <- length(design$control_multipliers) * length(design$treated_sizes)
+  planned_replications <- planned_cells * design$replications
+  state <- new.env(parent = emptyenv())
+  state$rows <- vector("list", planned_replications)
+  state$completed <- 0L
+  state$status <- "completed"
+  state$condition <- NULL
+  cluster <- NULL
+  on.exit(stop_simulation_cluster(cluster), add = TRUE)
+  export_names <- c("make_result", "run_replication", "fit_original_study_rep",
+                    "study_engine", "study_configs", "study_streams")
+  execution <- list(
+    requested_cores = options$cores,
+    workers = worker_count,
+    backend = if (worker_count == 1L) "serial" else "PSOCK",
+    rng_kind = RNGkind()
   )
-  on.exit({
-    if (!is.null(cluster)) parallel::stopCluster(cluster)
-  }, add = TRUE)
-
-  result_cells <- list()
-  cell_index <- 0L
-  for (multiplier in design$control_multipliers) {
-    for (treated_count in design$treated_sizes) {
-      message(sprintf("Running n1=%d, n0=%d (%d runs)",
-                      treated_count, multiplier * treated_count,
-                      design$replications))
-      cell_rows <- run_simulation_replications(
-        design$replications, run_replication,
-        arguments = list(multiplier = multiplier, treated_count = treated_count,
-                         target = target, design = design),
-        cluster = cluster
-      )
-      cell_results <- do.call(rbind, cell_rows)
-      message("Completed cell.")
-      cell_index <- cell_index + 1L
-      result_cells[[cell_index]] <- cell_results
+  message(sprintf("Scenario 1 uses %d worker(s); %d requested.",
+                  worker_count, options$cores))
+  message(sprintf(
+    "Workload: %d ratios x %d sample sizes = %d cells; %d runs per cell = %d datasets in total.",
+    length(design$control_multipliers), length(design$treated_sizes), planned_cells,
+    design$replications, planned_replications
+  ))
+  targets <- data.frame(
+    ratio = paste0("1:", design$control_multipliers),
+    target = vapply(study_configs[as.character(design$control_multipliers)],
+                     function(config) config$theta_true, numeric(1)),
+    stringsAsFactors = FALSE, row.names = NULL
+  )
+  tryCatch({
+    cluster <- start_simulation_cluster(worker_count, export_names,
+                                        envir = environment(run_replication))
+    cell_index <- 0L
+    for (ratio_index in seq_along(design$control_multipliers)) {
+      multiplier <- design$control_multipliers[ratio_index]
+      target <- targets$target[ratio_index]
+      message(sprintf("Ratio 1:%d: reference log-hazard ratio %.6f", multiplier, target))
+      for (treated_count in design$treated_sizes) {
+        cell_index <- cell_index + 1L
+        cell_completed <- 0L
+        last_progress <- proc.time()[["elapsed"]]
+        message(sprintf("Running cell %d/%d: ratio 1:%d, n1=%d, n0=%d (%d runs)",
+                        cell_index, planned_cells, multiplier,
+                        treated_count, multiplier * treated_count,
+                        design$replications))
+        record_result <- function(replicate, value) {
+          # Retain task order even when workers finish out of order.
+          suspendInterrupts({
+            task <- (cell_index - 1L) * design$replications + replicate
+            state$rows[task] <- list(value)
+            state$completed <- state$completed + 1L
+            cell_completed <<- cell_completed + 1L
+          })
+          now <- proc.time()[["elapsed"]]
+          if (cell_completed == 1L || cell_completed == design$replications ||
+              now - last_progress >= 5) {
+            message(sprintf(
+              "Completed %d/%d in cell %d/%d; %d/%d datasets overall; elapsed %.1f min (replicate %d).",
+              cell_completed, design$replications, cell_index, planned_cells,
+              state$completed, planned_replications, (now - started) / 60,
+              replicate
+            ))
+            last_progress <<- now
+          }
+        }
+        run_simulation_replications(
+          design$replications, run_replication,
+          arguments = list(multiplier = multiplier, treated_count = treated_count,
+                           target = target, design = design),
+          cluster = cluster, on_result = record_result
+        )
+      }
     }
-  }
+  }, interrupt = function(condition) {
+    state$status <- "interrupted"
+    state$condition <- conditionMessage(condition)
+  }, error = function(condition) {
+    state$status <- "failed"
+    state$condition <- conditionMessage(condition)
+  })
 
-  results <- do.call(rbind, result_cells)
-  summary <- summarize_results(results)
-
-  print(summary, row.names = FALSE, digits = 4)
-  if (any(summary$failed > 0L)) {
-    warning("Some fits failed; inspect the error column in the individual simulation results.",
-            call. = FALSE)
+  completed_rows <- Filter(Negate(is.null), state$rows)
+  if (length(completed_rows)) {
+    results <- do.call(rbind, completed_rows)
+    rownames(results) <- NULL
+    summary <- summarize_results(results)
+    print(summary, row.names = FALSE, digits = 4)
+    if (any(summary$failed > 0L)) {
+      message("Some fits failed; inspect the error column in the individual simulation results.")
+    }
+  } else {
+    results <- make_result(design$control_multipliers[1L],
+                           design$treated_sizes[1L], 1L, "", NA_real_)[0, ]
+    summary <- results[, c("ratio", "n1", "n0", "method"), drop = FALSE]
+    for (name in c("replications", "successful", "failed")) {
+      summary[[name]] <- integer()
+    }
+    for (name in c("coverage", "bias", "rmse")) summary[[name]] <- numeric()
   }
-  invisible(list(replications = results, summary = summary, metadata = metadata))
+  execution$status <- state$status
+  execution$completed_replications <- state$completed
+  execution$planned_replications <- planned_replications
+  execution$elapsed_seconds <- unname(proc.time()[["elapsed"]] - started)
+  if (!is.null(state$condition)) execution$condition <- state$condition
+  metadata <- list(design = design, quick_run = options$quick_run, targets = targets,
+                   study_engine = study_reference,
+                   saved_configurations = study_configs,
+                   rng_order = "Sample size varies fastest within each replicate",
+                   execution = execution, session = utils::sessionInfo())
+  message(sprintf("Scenario 1 %s: %d/%d completed datasets retained in memory.",
+                  state$status, state$completed, planned_replications))
+  if (state$status == "failed") message("Execution error: ", state$condition)
+  invisible(list(status = state$status, replications = results, summary = summary,
+                 targets = targets, metadata = metadata))
 }
 
 scenario1_results <- run_scenario1(design, options)
 scenario1_summary <- scenario1_results$summary
 scenario1_replications <- scenario1_results$replications
+scenario1_targets <- scenario1_results$targets
 
-# Keep every run in R; display the complete aggregated results.
-scenario1_display <- build_simulation_report(scenario1_results, "Scenario 1")
+# Keep completed runs in R, including partial results after an interruption.
+scenario1_display <- if (nrow(scenario1_replications)) {
+  build_simulation_report(scenario1_results, "Scenario 1")
+} else {
+  list(tables = list(), report = NULL)
+}
 scenario1_tables <- scenario1_display$tables
 scenario1_report <- scenario1_display$report
-show_simulation_report(scenario1_report)
-plot_scenario1_results(scenario1_summary)
+if (!is.null(scenario1_report)) {
+  show_simulation_report(scenario1_report)
+  plot_scenario1_results(scenario1_summary)
+}

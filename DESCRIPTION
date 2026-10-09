@@ -1,6 +1,6 @@
 Package: mecCox
 Title: Prognostic Balance for ATT-Weighted Cox Regression
-Version: 0.1.1
+Version: 0.1.2
 Authors@R: person("Se Yoon", "Lee", email = "seyoonlee.stat.math@gmail.com", role = c("aut", "cre", "cph"))
 Description: Fits marginal Cox comparisons with external controls. Provides an
     unweighted reference, inverse-probability weighting for the average
@@ -25,6 +25,7 @@ Suggests:
     kableExtra,
     MASS,
     ranger,
+    rngtools,
     rstudioapi,
     testthat (>= 3.0.0),
     torch

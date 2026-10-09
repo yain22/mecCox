@@ -179,9 +179,10 @@ configured in the script. The quick check defaults to two runs per
 retained design cell when the configured count remains at 1,000 and no
 count is supplied on the command line. A nondefault configured count or an
 explicit `--replications` count is retained. Quick mode uses one treated
-sample size and a smaller superpopulation reference; Scenario 2 also reduces
-the BART and RSF settings and retains all three nonlinearity settings. These
-runs check the code path and are not estimates from the paper's simulation.
+sample size and, for Scenario 1, one control-to-treated ratio; Scenario 2
+retains all three nonlinearity settings. Both scripts retain the study's
+learner settings and reference targets. These small runs check the code path;
+they are too small to assess simulation performance.
 
 The [running instructions](inst/reproduce/README.md) describe the
 generators, in-memory objects, and display options.
@@ -253,13 +254,16 @@ ml_fit <- fit_mec_cox(
 ```
 
 `ps_learner = "bart"` is also available for nonlinear source-propensity
-estimation, including the fits in the [Scenario 2 study
-script](inst/reproduce/scenario2.R). BART tree count, posterior draws,
-burn-in, and shrinkage are explicit arguments. The default API uses fixed
-BART settings. Scenario 2 selects `nuisance_settings = "original_study"`
-to use the original study's small-subset BART tuning and randomized survival
-forests. Its settings are recorded in the run metadata. Completed datasets
+estimation. BART tree count, posterior draws, burn-in, and shrinkage are
+explicit arguments; the default fitting API uses fixed BART settings.
+
+The [two main-paper study scripts](inst/reproduce/README.md) use the study
+designs and estimation procedures for Figures 4 and 5, including lightweight
+tuning and randomized survival-forest splitting. Their settings and
+implementation identifiers are recorded in run metadata. Completed datasets
 are reported during execution and retained in memory after interruption.
+See the [study implementation details](inst/reproduce/README.md#study-implementation)
+for the fitting and probability-extraction conventions.
 
 MEC-Cox uses positive Kullback–Leibler calibrated weights. The stored
 `basis`, `ps_oof`, `survival_oof`, `base_weights`, and `weights` make its

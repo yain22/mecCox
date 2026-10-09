@@ -902,18 +902,17 @@
 #'   fit's `ps_oof` when changing the survival learner, keep these inputs and
 #'   `ps_trim` unchanged; earlier clipping cannot be undone. This function checks
 #'   the vector's length and values, not its training provenance.
-#' @param nuisance_settings Learner configuration. `"standard"` retains the
+#' @param nuisance_settings Learner configuration. `"standard"` uses the
 #'   general-purpose settings. `"original_study"` uses the lightweight tuning
-#'   and forest controls from the original two-outcome-learner simulation:
+#'   and randomized survival-forest preset:
 #'   source-balanced BART tuning on at most `ml_tune_n` rows with a 70/30
 #'   stratified split; and RSF tuning on the first at most `ml_tune_n` controls
 #'   with a 50/50 event-stratified split. The RSF uses extremely randomized
 #'   splits, one candidate split, sampling without replacement at fraction
 #'   0.632, and 100 trees after successful tuning (300 trees by default without
-#'   tuning or if tuning fails). The preset retains this package's deterministic
-#'   fold seeds, posterior averaging of BART probabilities, and correctly
-#'   oriented mortality concordance; it does not reproduce the original
-#'   script's latent-score averaging or orientation-free concordance.
+#'   tuning or if tuning fails). This API uses fold-specific seeds, averaging
+#'   of transformed BART draws, and directional mortality concordance.
+#'   The main-paper simulation scripts use their bundled study functions.
 #' @param bart_auto_tune Whether to choose BART tree count from 25, 50, and 100
 #'   using held-out log loss within each training fold. Candidates and the final
 #'   selected fit use 100 posterior draws and 50 burn-in draws; shrinkage stays

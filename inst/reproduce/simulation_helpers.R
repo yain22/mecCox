@@ -1,5 +1,6 @@
 # Execution helpers shared by the two simulation scripts.
-# The scientific generators and fitting calls remain in each scenario script.
+# Original study generators and fitting functions are loaded by the scenario
+# scripts; this file handles execution and presentation.
 
 parse_simulation_arguments <- function(arguments = character(),
                                        quick_run = FALSE, cores = 20L,
@@ -112,9 +113,9 @@ start_simulation_cluster <- function(worker_count, export_names,
 run_simulation_replications <- function(replications, replication_function,
                                         arguments, cluster = NULL,
                                         on_result = NULL) {
-  # Each scenario sets a seed inside replication_function from the cell and
-  # run indices. Random numbers therefore do not depend on the worker
-  # that receives a task, even with load-balanced scheduling.
+  # Each scenario restores its run-specific random stream inside
+  # replication_function. Scheduling therefore does not change the stream
+  # received by a dataset.
   run_one <- function(replicate, replication_function, arguments) {
     do.call(replication_function, c(arguments, list(replicate = replicate)))
   }
