@@ -1,11 +1,12 @@
-# Reproduce the toy example where prognostic balancing improves precision.
+# Reproduce both designs of the manuscript toy example.
 # Run from a checkout (installing mecCox itself is not required):
-#   Rscript inst/reproduce/toy_precision_gain.R
+#   Rscript inst/reproduce/toy_example.R
 # Or source this file in R / RStudio after editing the settings below.
-# --quick uses 20 datasets for a code-path check, not a manuscript result.
-# --replications=N overrides the count; --output-dir=PATH optionally saves
-# CSV tables, the PDF/PNG figure, and sessionInfo. No files are saved by default.
-# Results remain in toy_precision_gain_results.
+# --quick uses 20 datasets per design for a code-path check, not a paper result.
+# --replications=N overrides the count per design; --output-dir=PATH optionally
+# saves both sets of CSV tables, PDF/PNG figures, and session information.
+# No files are saved by default. Results remain in toy_example_results, with
+# precision_gain and no_precision_gain components. Each design uses seed below.
 
 quick_run <- FALSE
 replications <- 10000L
@@ -42,10 +43,16 @@ toy_options <- parse_toy_arguments(arguments, quick_run = quick_run,
                                    output_dir = output_dir)
 if (toy_options$quick_run) {
   message("Quick check requested: ", toy_options$replications,
-          " datasets; manuscript design and estimators retained.")
+          " datasets per design; manuscript designs and estimators retained.")
 }
-toy_precision_gain_results <- run_toy_example(
-  "toy_precision_gain", replications = toy_options$replications,
-  seed = toy_options$seed, output_dir = toy_options$output_dir
+toy_example_results <- list(
+  precision_gain = run_toy_example(
+    "toy_precision_gain", replications = toy_options$replications,
+    seed = toy_options$seed, output_dir = toy_options$output_dir
+  ),
+  no_precision_gain = run_toy_example(
+    "toy_no_precision_gain", replications = toy_options$replications,
+    seed = toy_options$seed, output_dir = toy_options$output_dir
+  )
 )
 

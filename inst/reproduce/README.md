@@ -1,11 +1,10 @@
-# Run the toy examples, simulations, and public breast-cancer case study
+# Run the toy example, simulations, and public breast-cancer case study
 
-This directory contains runnable code for five analyses:
+This directory contains four runnable analysis scripts:
 
 | Analysis | Script | Output |
 | --- | --- | --- |
-| Toy example with a precision gain | [toy_precision_gain.R](toy_precision_gain.R) | Three-panel figure and numerical summary |
-| Toy example with no additional precision gain | [toy_no_precision_gain.R](toy_no_precision_gain.R) | Three-panel figure and numerical summary |
+| Toy example | [toy_example.R](toy_example.R) | Three-panel figures and numerical summaries for both designs |
 | Simulation 1 | [scenario1.R](scenario1.R) | Simulation summary and figure |
 | Simulation 2 | [scenario2.R](scenario2.R) | Simulation summary and figure |
 | Public breast-cancer case study | [breast_cancer.R](breast_cancer.R) | Two analysis tables in the format of supplementary Tables S2 and S3 |
@@ -13,35 +12,35 @@ This directory contains runnable code for five analyses:
 The breast-cancer data are public datasets included in `survival`; they are
 not subject to the restrictions of the separate SQUIRE/MSK-CHORD application.
 No restricted patient records are included in these examples. The scripts
-display results and retain R objects. The toy scripts also support optional
+display results and retain R objects. The toy script also supports optional
 file export; the other three scripts do not export result files.
 The [case-study instructions](#public-breast-cancer-case-study) appear below
 the simulation instructions.
 
-## Toy prognostic-balance examples
+## Toy example
 
-The two toy scripts reproduce the prognostic-balance examples in the paper.
-They can run directly from a checkout without installing `mecCox`. Install
-their dependencies once:
+The toy script reproduces both prognostic-balance designs in the paper.
+It can run directly from a checkout without installing `mecCox`. Install
+its dependencies once:
 
 ```r
 install.packages(c("survival", "ggplot2", "patchwork"))
 ```
 
-Both designs use 10,000 simulated datasets, 200 treated patients, 400 external
+Each design uses 10,000 simulated datasets, 200 treated patients, 400 external
 controls, and seed `20261007`. The binary covariate `X1` has probability 0.7
 in the treated cohort and 0.3 in the external-control cohort. `X2` is an
 independent standard normal variable in both cohorts. Event times under
 treatment and control have the same exponential hazard, so the true ATT
 log hazard ratio is zero:
 
-| Script | Event hazard under either treatment | Oracle score at time 5 |
+| Design | Event hazard under either treatment | Oracle score at time 5 |
 | --- | --- | --- |
-| `toy_precision_gain.R` | `0.08 * exp(0.5 * X1 + X2)` | `exp(-0.4 * exp(0.5 * X1 + X2))` |
-| `toy_no_precision_gain.R` | `0.08 * exp(0.5 * X1)` | `exp(-0.4 * exp(0.5 * X1))` |
+| Precision gain | `0.08 * exp(0.5 * X1 + X2)` | `exp(-0.4 * exp(0.5 * X1 + X2))` |
+| No additional precision gain | `0.08 * exp(0.5 * X1)` | `exp(-0.4 * exp(0.5 * X1))` |
 
 Censoring is independently exponential with rate 0.03, with administrative
-censoring at time 5. Both scripts fit ATT odds from the logistic source model
+censoring at time 5. Both designs fit ATT odds from the logistic source model
 with an intercept and `X1`, and use KL calibration with an intercept, `X1`,
 and the oracle prognostic score. The two weighted Cox regressions are fitted
 separately in every dataset. The second design still generates `X2`, keeping
@@ -49,69 +48,69 @@ the original random-draw order; only its coefficient in the hazard changes.
 Its oracle score is a function of binary `X1`, which is already balanced by
 the baseline weights. The calibration constraint is therefore redundant.
 
-From the repository root, run the full examples:
+From the repository root, run both designs with one command:
 
 ```sh
-Rscript inst/reproduce/toy_precision_gain.R
-Rscript inst/reproduce/toy_no_precision_gain.R
+Rscript inst/reproduce/toy_example.R
 ```
 
 To check the code quickly or choose a replication count:
 
 ```sh
-Rscript inst/reproduce/toy_precision_gain.R --quick
-Rscript inst/reproduce/toy_no_precision_gain.R --quick
-Rscript inst/reproduce/toy_precision_gain.R --replications=100
+Rscript inst/reproduce/toy_example.R --quick
+Rscript inst/reproduce/toy_example.R --replications=100
 ```
 
-`--quick` uses 20 datasets when the configured replication count is unchanged.
-An explicit `--replications=N` overrides that count and must be an integer
-of at least two. Quick runs check execution; they do not reproduce the
-paper's empirical SDs. Both scripts use serial simulation to preserve the
-original sequence of random draws.
+`--quick` uses 20 datasets per design when the configured replication count
+is unchanged. An explicit `--replications=N` sets the count per design and
+must be an integer of at least two. Quick runs check execution; they do not
+reproduce the paper's empirical SDs. The script runs the precision-gain
+design first, then the second design, resetting the seed before each.
+Serial simulation preserves the original sequence of random draws.
 
-In RStudio, open either script and click **Source**, or use `source()`:
+In RStudio, open the script and click **Source**, or use `source()`:
 
 ```r
-source("inst/reproduce/toy_precision_gain.R")
-source("inst/reproduce/toy_no_precision_gain.R")
+source("inst/reproduce/toy_example.R")
 ```
 
-After installing the current GitHub package, the scripts are also available
+After installing the current GitHub package, the script is also available
 through `system.file()`:
 
 ```r
-source(system.file("reproduce", "toy_precision_gain.R", package = "mecCox"))
-source(system.file("reproduce", "toy_no_precision_gain.R", package = "mecCox"))
+source(system.file("reproduce", "toy_example.R", package = "mecCox"))
 ```
 
-Each script has editable `quick_run`, `replications`, `seed`, and `output_dir`
+The script has editable `quick_run`, `replications`, `seed`, and `output_dir`
 settings near the top. Set these inside the script before sourcing it.
 Absolute script paths work from other working directories. When downloading
-the scripts separately, keep `toy_helpers.R` in the same directory.
+the files separately, keep `toy_helpers.R` in the same directory.
 
-The results remain in `toy_precision_gain_results` and
-`toy_no_precision_gain_results`, respectively. Each contains `replications`,
+The results remain in `toy_example_results`, with `precision_gain` and
+`no_precision_gain` components. Each component contains `replications`,
 `summary`, `diagnostics`, `figure`, and `metadata`. For example:
 
 ```r
-toy_precision_gain_results$summary
-toy_precision_gain_results$diagnostics
-print(toy_precision_gain_results$figure)
+toy_example_results$precision_gain$summary
+toy_example_results$no_precision_gain$summary
+print(toy_example_results$precision_gain$figure)
+print(toy_example_results$no_precision_gain$figure)
 ```
 
-The scripts print numerical summaries. In an interactive graphics session,
-the figure appears in the active graphics device, normally RStudio's
-**Plots** pane. They create no result files by default. For explicit export:
+The script prints both numerical summaries. In an interactive graphics
+session, the figures appear in sequence in the active graphics device,
+normally RStudio's **Plots** pane. It creates no result files by default.
+For explicit export:
 
 ```sh
-Rscript inst/reproduce/toy_precision_gain.R --output-dir=toy-gain-output
-Rscript inst/reproduce/toy_no_precision_gain.R --output-dir=toy-no-gain-output
+Rscript inst/reproduce/toy_example.R --output-dir=toy-example-output
 ```
 
-Each output directory receives the three-panel figure as PDF and PNG,
+The output directory receives both three-panel figures as PDF and PNG,
 replication-level estimates, summary and diagnostic CSVs, and R session
-information. Exporting is optional and does not change the simulation.
+information. The filenames begin with `toy_precision_gain` or
+`toy_no_precision_gain` to distinguish the designs. Exporting is optional
+and does not change the simulation.
 
 Expected results from the full manuscript runs are:
 
