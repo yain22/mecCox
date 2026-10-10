@@ -1,19 +1,133 @@
-# Run the simulations and public breast-cancer case study
+# Run the toy examples, simulations, and public breast-cancer case study
 
-This directory contains runnable code for three analyses:
+This directory contains runnable code for five analyses:
 
 | Analysis | Script | Output |
 | --- | --- | --- |
+| Toy example with a precision gain | [toy_precision_gain.R](toy_precision_gain.R) | Three-panel figure and numerical summary |
+| Toy example with no additional precision gain | [toy_no_precision_gain.R](toy_no_precision_gain.R) | Three-panel figure and numerical summary |
 | Simulation 1 | [scenario1.R](scenario1.R) | Simulation summary and figure |
 | Simulation 2 | [scenario2.R](scenario2.R) | Simulation summary and figure |
 | Public breast-cancer case study | [breast_cancer.R](breast_cancer.R) | Two analysis tables in the format of supplementary Tables S2 and S3 |
 
 The breast-cancer data are public datasets included in `survival`; they are
 not subject to the restrictions of the separate SQUIRE/MSK-CHORD application.
-No restricted patient records are included in these examples. All three
-scripts display results and retain R objects without exporting result files.
+No restricted patient records are included in these examples. The scripts
+display results and retain R objects. The toy scripts also support optional
+file export; the other three scripts do not export result files.
 The [case-study instructions](#public-breast-cancer-case-study) appear below
 the simulation instructions.
+
+## Toy prognostic-balance examples
+
+The two toy scripts reproduce the prognostic-balance examples in the paper.
+They can run directly from a checkout without installing `mecCox`. Install
+their dependencies once:
+
+```r
+install.packages(c("survival", "ggplot2", "patchwork"))
+```
+
+Both designs use 10,000 simulated datasets, 200 treated patients, 400 external
+controls, and seed `20261007`. The binary covariate `X1` has probability 0.7
+in the treated cohort and 0.3 in the external-control cohort. `X2` is an
+independent standard normal variable in both cohorts. Event times under
+treatment and control have the same exponential hazard, so the true ATT
+log hazard ratio is zero:
+
+| Script | Event hazard under either treatment | Oracle score at time 5 |
+| --- | --- | --- |
+| `toy_precision_gain.R` | `0.08 * exp(0.5 * X1 + X2)` | `exp(-0.4 * exp(0.5 * X1 + X2))` |
+| `toy_no_precision_gain.R` | `0.08 * exp(0.5 * X1)` | `exp(-0.4 * exp(0.5 * X1))` |
+
+Censoring is independently exponential with rate 0.03, with administrative
+censoring at time 5. Both scripts fit ATT odds from the logistic source model
+with an intercept and `X1`, and use KL calibration with an intercept, `X1`,
+and the oracle prognostic score. The two weighted Cox regressions are fitted
+separately in every dataset. The second design still generates `X2`, keeping
+the original random-draw order; only its coefficient in the hazard changes.
+Its oracle score is a function of binary `X1`, which is already balanced by
+the baseline weights. The calibration constraint is therefore redundant.
+
+From the repository root, run the full examples:
+
+```sh
+Rscript inst/reproduce/toy_precision_gain.R
+Rscript inst/reproduce/toy_no_precision_gain.R
+```
+
+To check the code quickly or choose a replication count:
+
+```sh
+Rscript inst/reproduce/toy_precision_gain.R --quick
+Rscript inst/reproduce/toy_no_precision_gain.R --quick
+Rscript inst/reproduce/toy_precision_gain.R --replications=100
+```
+
+`--quick` uses 20 datasets when the configured replication count is unchanged.
+An explicit `--replications=N` overrides that count and must be an integer
+of at least two. Quick runs check execution; they do not reproduce the
+paper's empirical SDs. Both scripts use serial simulation to preserve the
+original sequence of random draws.
+
+In RStudio, open either script and click **Source**, or use `source()`:
+
+```r
+source("inst/reproduce/toy_precision_gain.R")
+source("inst/reproduce/toy_no_precision_gain.R")
+```
+
+After installing the current GitHub package, the scripts are also available
+through `system.file()`:
+
+```r
+source(system.file("reproduce", "toy_precision_gain.R", package = "mecCox"))
+source(system.file("reproduce", "toy_no_precision_gain.R", package = "mecCox"))
+```
+
+Each script has editable `quick_run`, `replications`, `seed`, and `output_dir`
+settings near the top. Set these inside the script before sourcing it.
+Absolute script paths work from other working directories. When downloading
+the scripts separately, keep `toy_helpers.R` in the same directory.
+
+The results remain in `toy_precision_gain_results` and
+`toy_no_precision_gain_results`, respectively. Each contains `replications`,
+`summary`, `diagnostics`, `figure`, and `metadata`. For example:
+
+```r
+toy_precision_gain_results$summary
+toy_precision_gain_results$diagnostics
+print(toy_precision_gain_results$figure)
+```
+
+The scripts print numerical summaries. In an interactive graphics session,
+the figure appears in the active graphics device, normally RStudio's
+**Plots** pane. They create no result files by default. For explicit export:
+
+```sh
+Rscript inst/reproduce/toy_precision_gain.R --output-dir=toy-gain-output
+Rscript inst/reproduce/toy_no_precision_gain.R --output-dir=toy-no-gain-output
+```
+
+Each output directory receives the three-panel figure as PDF and PNG,
+replication-level estimates, summary and diagnostic CSVs, and R session
+information. Exporting is optional and does not change the simulation.
+
+Expected results from the full manuscript runs are:
+
+| Design | ATT-IPW Cox empirical SD | MEC-Cox empirical SD | MEC-Cox / ATT-IPW empirical variance |
+| --- | ---: | ---: | ---: |
+| Precision gain | 0.145398 | 0.123542 | 0.721960 |
+| No additional precision gain | 0.152738 | 0.152738 | 1.000000 |
+
+The figures use the same single-line gap labels as the manuscript. Panel
+(a) compares empirical prognostic-score gaps; panel (b) plots the change in
+the Cox estimate against the initial ATT-IPW gap; panel (c) compares the
+sampling distributions. In the second design, panels (a) and (b) show a point
+mass at zero and coincident points. Residuals below `1e-10` are displayed as
+zero there; raw replication values are retained. Fixed seeds reproduce the
+numerical results in the same R and package environment; exported session
+information records that environment.
 
 ## Simulation dependencies
 

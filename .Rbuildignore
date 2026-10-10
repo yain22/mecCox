@@ -2,3 +2,5 @@
 ^\.github$
 ^LICENSE\.md$
 ^inst/reproduce/SQUIRE_Section6_encrypted\.zip$
+^toy-gain-output$
+^toy-no-gain-output$

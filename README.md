@@ -72,13 +72,15 @@ predicted_risk_balance(mec, times = c(3, 6, 9, 12, 15))
 The included `example_external_controls` data are entirely simulated. They
 contain no SQUIRE or MSK-CHORD patient records.
 
-## Run the simulations and public case study
+## Run the toy examples, simulations, and public case study
 
-The repository provides runnable code for two simulation experiments and
-one public-data case study:
+The repository provides runnable code for two toy examples, two simulation
+experiments, and one public-data case study:
 
 | Study | Script | Results |
 | --- | --- | --- |
+| Toy example: precision gain from prognostic balancing | [toy_precision_gain.R](inst/reproduce/toy_precision_gain.R) | Three-panel figure, empirical SDs, and weight diagnostics |
+| Toy example: no additional precision gain | [toy_no_precision_gain.R](inst/reproduce/toy_no_precision_gain.R) | The same comparisons when the baseline weights already balance prognosis |
 | Simulation 1: linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
 | Simulation 2: increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
 | Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S2 and S3 |
@@ -87,6 +89,37 @@ The breast-cancer example uses the public `gbsg` and `rotterdam` datasets
 distributed with the R package `survival`. These data are available to anyone
 who installs that package. The separate SQUIRE/MSK-CHORD application uses
 restricted patient data, which are not distributed here.
+
+### Toy prognostic-balance examples
+
+These scripts reproduce the two toy examples using 10,000 simulated datasets,
+`n1 = 200`, `n0 = 400`, and seed `20261007`. The first example gives empirical
+SDs of approximately **0.145 for ATT-IPW Cox and 0.124 for MEC-Cox**. In the
+second, prognosis depends only on the binary covariate already balanced by
+the fitted ATT odds, so calibration leaves the weights and estimates
+unchanged up to numerical precision; both empirical SDs are approximately
+**0.153**.
+
+Install the three required packages:
+
+```r
+install.packages(c("survival", "ggplot2", "patchwork"))
+```
+
+From the repository root, run:
+
+```sh
+Rscript inst/reproduce/toy_precision_gain.R
+Rscript inst/reproduce/toy_no_precision_gain.R
+```
+
+Both scripts also support RStudio's **Source** button and `source()`. They
+display summaries and retain results in R. Add `--quick` for a 20-dataset
+code check, or `--output-dir=path` to save the three-panel PDF/PNG figures,
+numerical results, and R session information. When downloading individual
+files, keep [toy_helpers.R](inst/reproduce/toy_helpers.R) beside both scripts.
+The [toy reproduction instructions](inst/reproduce/README.md#toy-prognostic-balance-examples)
+describe the designs, settings, and result objects.
 
 ### Simulation experiments
 

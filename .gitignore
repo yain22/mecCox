@@ -8,4 +8,6 @@
 !/inst/reproduce/SQUIRE_Section6_encrypted.zip
 /scenario1-output/
 /scenario1-quick/
+/toy-gain-output/
+/toy-no-gain-output/
 inst/doc/

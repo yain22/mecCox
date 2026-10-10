@@ -21,9 +21,11 @@ Imports:
 Suggests:
     brulee,
     dbarts,
+    ggplot2,
     htmltools,
     kableExtra,
     MASS,
+    patchwork,
     ranger,
     rngtools,
     rstudioapi,
