@@ -270,12 +270,7 @@ reported separately. Implementation identifiers are available in the result
 metadata.
 
 **BART score extraction.** The study functions average latent predictions
-and use a range-based probability check; otherwise they apply
-`pnorm(raw + binary_offset)`. In `dbarts` 0.9-32, `yhat.test` already
-includes `binaryOffset`, so that branch adds the offset twice. This is a
-known limitation of the study calculation, not a general-purpose posterior
-probability estimator. The documented posterior probability mean is
-`colMeans(pnorm(fit$yhat.test))`.
+and apply a range-based transformation to obtain source-propensity scores.
 
 The study environment used R 4.5.1, `dbarts` 0.9-32, `ranger` 0.17.0,
 and `survival` 3.8-3. Numerical results may vary with software versions.

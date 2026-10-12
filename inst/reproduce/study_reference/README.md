@@ -13,11 +13,9 @@ isolated engine, generate sample-size-first RNG streams, and run individual
 jobs. A quick run selects fewer jobs from the same stream grid and keeps the
 learner settings, folds, and landmarks.
 
-The BART study conversion averages latent draws and uses a range check to
-decide whether to treat these means as probabilities or apply the normal CDF.
-The latter branch adds `binaryOffset` again, although binary `yhat.test` in
-dbarts 0.9-32 already includes that offset. This calculation differs from
-averaging the posterior probability draws. RSF tuning uses `max(C, 1 - C)`.
+The BART study implementation averages latent predictions and applies a
+range-based transformation to obtain source-propensity scores. RSF tuning
+uses `max(C, 1 - C)`.
 
 The study engines run separately from `mecCox::fit_mec_cox()`. No raw simulation
 results or patient data are included. Numerical results can vary with R and

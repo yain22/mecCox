@@ -14,7 +14,7 @@ list(scenario1 = list(scenario = "scenario1", source_basename = "Sim_MEC_Cox_lan
     "choose_landmark_times", "predict_survival_cox_train", "predict_survival_rsf_train",
     "estimate_mec_nuisance", "fit_mec_cox", "compute_true_att_target",
     "empty_row", "fit_one_rep", "required_worker_packages"),
-    extracted_on = "2026-10-09", calculation_note = "The BART study conversion uses latent means and a range heuristic; its probit branch adds binaryOffset to values that already include it in dbarts. This differs from the posterior mean probability. RSF tuning uses max(C, 1-C)."),
+    extracted_on = "2026-10-09", calculation_note = "The BART study implementation uses latent means and a range-based transformation. RSF tuning uses max(C, 1-C)."),
     scenario2 = list(scenario = "scenario2", source_basename = "Sim_MEC_Cox_landmark_feature_two_OR.R",
         source_sha256 = "f1ea6ce94abe51057a045604a55c3d54a4d2b4ac30b1f839a281448024ff4055",
         engine_basename = "scenario2_functions.R", engine_sha256 = "f7da734d99eeb6e3d9c20914d63f3a9cd3cdfaf28318128ad73d76c9778a99a3",
@@ -32,4 +32,4 @@ list(scenario1 = list(scenario = "scenario1", source_basename = "Sim_MEC_Cox_lan
         "predict_survival_rsf_train", "estimate_mec_nuisance",
         "fit_mec_cox", "compute_true_att_target", "empty_row",
         "fit_one_rep", "required_worker_packages"), extracted_on = "2026-10-09",
-        calculation_note = "The BART study conversion uses latent means and a range heuristic; its probit branch adds binaryOffset to values that already include it in dbarts. This differs from the posterior mean probability. RSF tuning uses max(C, 1-C)."))
+        calculation_note = "The BART study implementation uses latent means and a range-based transformation. RSF tuning uses max(C, 1-C)."))
