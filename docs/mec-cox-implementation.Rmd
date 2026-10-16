@@ -290,93 +290,93 @@ for (a in c(0L, 1L)) {
 
 We consider two implementations of the control-survival learner.
 
-**Cox proportional hazards regression** ([Cox, 1972](https://doi.org/10.1111/j.2517-6161.1972.tb00899.x); [Cox, 1975](https://doi.org/10.1093/biomet/62.2.269)). Fit the working model among the
-external-control subjects in the training fold,
+- **Cox proportional hazards regression** ([Cox, 1972](https://doi.org/10.1111/j.2517-6161.1972.tb00899.x); [Cox, 1975](https://doi.org/10.1093/biomet/62.2.269)). Fit the working model among the
+    external-control subjects in the training fold,
 
-\[
-\lambda_0^{(-k)}(t\mid X)
-=\lambda_{00}^{(-k)}(t)\exp\{X^\top\beta_0^{(-k)}\},
-\qquad i\in\mathcal I_0\cap\mathcal J^{(-k)}.
-\]
+    \[
+    \lambda_0^{(-k)}(t\mid X)
+    =\lambda_{00}^{(-k)}(t)\exp\{X^\top\beta_0^{(-k)}\},
+    \qquad i\in\mathcal I_0\cap\mathcal J^{(-k)}.
+    \]
 
-Let $\widehat\beta_0^{(-k)}$ and
-$\widehat\Lambda_{00}^{(-k)}(t)$ denote its fitted regression coefficient
-and baseline cumulative hazard estimator. For a validation subject,
+    Let $\widehat\beta_0^{(-k)}$ and
+    $\widehat\Lambda_{00}^{(-k)}(t)$ denote its fitted regression coefficient
+    and baseline cumulative hazard estimator. For a validation subject,
 
-\[
-\widehat S_{0,\mathrm{Cox}}^{(-k)}(t_\ell\mid X_i)
-=\exp\left[-\widehat\Lambda_{00}^{(-k)}(t_\ell)
-\exp\{X_i^\top\widehat\beta_0^{(-k)}\}\right],
-\qquad \ell=1,\ldots,L.
-\]
+    \[
+    \widehat S_{0,\mathrm{Cox}}^{(-k)}(t_\ell\mid X_i)
+    =\exp\left[-\widehat\Lambda_{00}^{(-k)}(t_\ell)
+    \exp\{X_i^\top\widehat\beta_0^{(-k)}\}\right],
+    \qquad \ell=1,\ldots,L.
+    \]
 
-```{r survival-cox-function}
-predict_survival_cox <- function(training0, validation, fold_seed, settings) {
-  survival_formula <- reformulate(X_names, response = "Surv(time, event)")
-  outcome_fit <- coxph(
-    survival_formula, data = training0,
-    ties = "breslow", x = TRUE, singular.ok = FALSE,
-    control = coxph.control(timefix = FALSE)
-  )
-  baseline <- basehaz(outcome_fit, centered = FALSE)
-  j <- findInterval(t_landmark, baseline$time)
-  Lambda00_hat <- numeric(L)
-  Lambda00_hat[j > 0L] <- baseline$hazard[j[j > 0L]]
-  lp <- predict(outcome_fit, newdata = validation,
-                type = "lp", reference = "zero")
-  exp(-outer(exp(lp), Lambda00_hat))
-}
-```
+    ```{r survival-cox-function}
+    predict_survival_cox <- function(training0, validation, fold_seed, settings) {
+      survival_formula <- reformulate(X_names, response = "Surv(time, event)")
+      outcome_fit <- coxph(
+        survival_formula, data = training0,
+        ties = "breslow", x = TRUE, singular.ok = FALSE,
+        control = coxph.control(timefix = FALSE)
+      )
+      baseline <- basehaz(outcome_fit, centered = FALSE)
+      j <- findInterval(t_landmark, baseline$time)
+      Lambda00_hat <- numeric(L)
+      Lambda00_hat[j > 0L] <- baseline$hazard[j[j > 0L]]
+      lp <- predict(outcome_fit, newdata = validation,
+                    type = "lp", reference = "zero")
+      exp(-outer(exp(lp), Lambda00_hat))
+    }
+    ```
 
-The uncentered linear predictors are paired with the uncentered baseline
-cumulative hazard. At each landmark, the code uses the most recent cumulative
-hazard value; before the first event the hazard is zero and survival is one.
+    The uncentered linear predictors are paired with the uncentered baseline
+    cumulative hazard. At each landmark, the code uses the most recent cumulative
+    hazard value; before the first event the hazard is zero and survival is one.
 
-**Random survival forest (RSF)** ([Ishwaran et al., 2008](https://doi.org/10.1214/08-AOAS169)). Alternatively, fit an RSF on the same
-external-control training subjects. For each tree $b=1,\ldots,B$, let
-$\widehat\Lambda_{0b}^{(-k)}(t\mid X_i)$ denote the terminal-node cumulative
-hazard estimate for a validation subject. The `ranger` implementation averages
-these cumulative hazards and then converts the result to survival:
+- **Random survival forest (RSF)** ([Ishwaran et al., 2008](https://doi.org/10.1214/08-AOAS169)). Alternatively, fit an RSF on the same
+    external-control training subjects. For each tree $b=1,\ldots,B$, let
+    $\widehat\Lambda_{0b}^{(-k)}(t\mid X_i)$ denote the terminal-node cumulative
+    hazard estimate for a validation subject. The `ranger` implementation averages
+    these cumulative hazards and then converts the result to survival:
 
-\[
-\widehat S_{0,\mathrm{RSF}}^{(-k)}(t_\ell\mid X_i)
-=\exp\left\{-\frac{1}{B}\sum_{b=1}^{B}
-\widehat\Lambda_{0b}^{(-k)}(t_\ell\mid X_i)\right\},
-\qquad \ell=1,\ldots,L.
-\]
+    \[
+    \widehat S_{0,\mathrm{RSF}}^{(-k)}(t_\ell\mid X_i)
+    =\exp\left\{-\frac{1}{B}\sum_{b=1}^{B}
+    \widehat\Lambda_{0b}^{(-k)}(t_\ell\mid X_i)\right\},
+    \qquad \ell=1,\ldots,L.
+    \]
 
-This gives a flexible, nonparametric estimate of the conditional control
-survival function at the same landmark times. The function below uses the
-forest survival output directly and evaluates its step function at those times.
+    This gives a flexible, nonparametric estimate of the conditional control
+    survival function at the same landmark times. The function below uses the
+    forest survival output directly and evaluates its step function at those times.
 
-```{r survival-rsf-function}
-predict_survival_rsf <- function(training0, validation, fold_seed, settings) {
-  if (!requireNamespace("ranger", quietly = TRUE)) {
-    stop("Install ranger to select survival_method = 'rsf'.")
-  }
-  training_frame <- training0[, c("time", "event", X_names), drop = FALSE]
-  forest <- ranger::ranger(
-    Surv(time, event) ~ ., data = training_frame,
-    num.trees = settings$num_trees,
-    min.node.size = settings$min_node_size,
-    mtry = max(1L, floor(sqrt(length(X_names)))),
-    splitrule = "logrank", num.random.splits = 1L,
-    replace = TRUE, sample.fraction = 1,
-    write.forest = TRUE, oob.error = FALSE,
-    seed = fold_seed, num.threads = 1L
-  )
-  prediction <- predict(forest,
-    data = validation[, X_names, drop = FALSE], num.threads = 1L
-  )
-  j <- findInterval(t_landmark, prediction$unique.death.times)
-  S <- matrix(1, nrow = nrow(validation), ncol = L)
-  observed <- which(j > 0L)
-  if (length(observed)) {
-    S[, observed] <- prediction$survival[, j[observed], drop = FALSE]
-  }
-  S
-}
-```
+    ```{r survival-rsf-function}
+    predict_survival_rsf <- function(training0, validation, fold_seed, settings) {
+      if (!requireNamespace("ranger", quietly = TRUE)) {
+        stop("Install ranger to select survival_method = 'rsf'.")
+      }
+      training_frame <- training0[, c("time", "event", X_names), drop = FALSE]
+      forest <- ranger::ranger(
+        Surv(time, event) ~ ., data = training_frame,
+        num.trees = settings$num_trees,
+        min.node.size = settings$min_node_size,
+        mtry = max(1L, floor(sqrt(length(X_names)))),
+        splitrule = "logrank", num.random.splits = 1L,
+        replace = TRUE, sample.fraction = 1,
+        write.forest = TRUE, oob.error = FALSE,
+        seed = fold_seed, num.threads = 1L
+      )
+      prediction <- predict(forest,
+        data = validation[, X_names, drop = FALSE], num.threads = 1L
+      )
+      j <- findInterval(t_landmark, prediction$unique.death.times)
+      S <- matrix(1, nrow = nrow(validation), ncol = L)
+      observed <- which(j > 0L)
+      if (length(observed)) {
+        S[, observed] <- prediction$survival[, j[observed], drop = FALSE]
+      }
+      S
+    }
+    ```
 
 Choose the survival learner below. The default is Cox; the fixed RSF settings
 provide an executable alternative for this worked example, with no tuning.
@@ -446,187 +446,187 @@ odds and normalize them to have total mass equal to the treated cohort size:
 These normalized odds weights are the baseline for the Bregman calibration
 in Step 3. We consider two implementations of the source propensity-score learner.
 
-**Logistic regression.** The GLM working model is
+- **Logistic regression.** The GLM working model is
 
-\[
-\pi_\gamma(X_i)
-=\frac{\exp(\gamma^\top\widetilde X_i)}
-       {1+\exp(\gamma^\top\widetilde X_i)},
-\]
+    \[
+    \pi_\gamma(X_i)
+    =\frac{\exp(\gamma^\top\widetilde X_i)}
+           {1+\exp(\gamma^\top\widetilde X_i)},
+    \]
 
-where $\widetilde X_i$ contains an intercept and the selected baseline
-covariates. Fitting it on $\mathcal J^{(-k)}$ gives $\widehat\gamma^{(-k)}$,
-and the held-out prediction is
+    where $\widetilde X_i$ contains an intercept and the selected baseline
+    covariates. Fitting it on $\mathcal J^{(-k)}$ gives $\widehat\gamma^{(-k)}$,
+    and the held-out prediction is
 
-\[
-\widehat\pi^{(-k)}_{\mathrm{glm}}(X_i)
-=\frac{\exp\{(\widehat\gamma^{(-k)})^\top\widetilde X_i\}}
-       {1+\exp\{(\widehat\gamma^{(-k)})^\top\widetilde X_i\}}.
-\]
+    \[
+    \widehat\pi^{(-k)}_{\mathrm{glm}}(X_i)
+    =\frac{\exp\{(\widehat\gamma^{(-k)})^\top\widetilde X_i\}}
+           {1+\exp\{(\widehat\gamma^{(-k)})^\top\widetilde X_i\}}.
+    \]
 
-```{r propensity-glm-function}
-predict_ps_glm <- function(training, validation, fold_seed, settings) {
-  fit <- glm(reformulate(X_names, response = "A"),
-             data = training, family = binomial())
-  stopifnot(isTRUE(fit$converged), all(is.finite(coef(fit))))
-  as.numeric(predict(fit, newdata = validation, type = "response"))
-}
-```
-
-**Flexible machine-learning classifier.** Alternatively, train a binary
-classifier on the same pooled training sample. Examples include deep learning
-([LeCun et al., 2015](https://doi.org/10.1038/nature14539)), random forest
-([Breiman, 2001](https://doi.org/10.1023/A:1010933404324)), and Bayesian additive
-regression trees (BART; [Chipman et al., 2010](https://doi.org/10.1214/09-AOAS285)).
-Each produces the held-out estimate
-
-\[
-\widehat\pi^{(-k)}_{\mathrm{ML}}(X_i)
-=\widehat{\Pr}(A_i=1\mid X_i).
-\]
-
-The functions below implement these alternatives directly. `"glm"` remains
-the default; changing `ps_method` selects one learner. The fixed settings are
-for this worked example, with no tuning. The optional packages are needed
-only when their corresponding learner is selected. The MLP option also needs
-the torch runtime installed.
-
-```{r propensity-settings}
-ps_method <- "glm"                 # "glm", "rf", "bart", or "mlp"
-ps_trim <- c(0.01, 0.99)
-ps_settings <- list(
-  rf_trees = 100L, rf_min_node_size = 5L,
-  bart_trees = 50L, bart_draws = 500L, bart_burn_in = 200L,
-  bart_shrinkage = 2,
-  mlp_hidden_units = c(16L, 8L), mlp_epochs = 50L
-)
-```
-
-The random-forest classifier returns the probability of source group 1.
-
-```{r propensity-rf-function}
-predict_ps_rf <- function(training, validation, fold_seed, settings) {
-  if (!requireNamespace("ranger", quietly = TRUE)) {
-    stop("Install ranger to select ps_method = 'rf'.")
-  }
-  training$A_factor <- factor(training$A, levels = c(0, 1))
-  fit <- ranger::ranger(
-    reformulate(X_names, response = "A_factor"), data = training,
-    probability = TRUE, num.trees = settings$rf_trees,
-    min.node.size = settings$rf_min_node_size,
-    mtry = max(1L, floor(sqrt(length(X_names)))),
-    seed = fold_seed, num.threads = 1L, oob.error = FALSE
-  )
-  as.numeric(predict(fit, data = validation[, X_names, drop = FALSE],
-                     num.threads = 1L)$predictions[, "1"])
-}
-```
-
-BART and the neural network use numeric predictor matrices. Factor coding
-is determined from the training fold and applied unchanged to the validation
-fold. Validation subjects do not determine factor levels or scaling values.
-
-```{r propensity-matrix-function}
-ps_predictor_matrices <- function(training, validation) {
-  training <- training[, X_names, drop = FALSE]
-  validation <- validation[, X_names, drop = FALSE]
-  for (name in X_names) {
-    if (is.factor(training[[name]]) || is.character(training[[name]])) {
-      train_factor <- droplevels(factor(training[[name]]))
-      observed_levels <- levels(train_factor)
-      if (length(observed_levels) < 2L ||
-          any(!as.character(validation[[name]]) %in% observed_levels)) {
-        stop("A validation factor level is absent from its training fold.")
-      }
-      training[[name]] <- train_factor
-      validation[[name]] <- factor(as.character(validation[[name]]),
-                                   levels = observed_levels)
+    ```{r propensity-glm-function}
+    predict_ps_glm <- function(training, validation, fold_seed, settings) {
+      fit <- glm(reformulate(X_names, response = "A"),
+                 data = training, family = binomial())
+      stopifnot(isTRUE(fit$converged), all(is.finite(coef(fit))))
+      as.numeric(predict(fit, newdata = validation, type = "response"))
     }
-  }
-  formula <- reformulate(X_names)
-  x_train <- model.matrix(formula, training)[, -1L, drop = FALSE]
-  x_valid <- model.matrix(formula, validation)[, -1L, drop = FALSE]
-  stopifnot(identical(colnames(x_train), colnames(x_valid)))
-  list(training = x_train, validation = x_valid)
-}
-```
+    ```
 
-For binary BART with a probit link, probabilities are averaged over posterior
-draws. The offset is supplied once when fitting; the returned latent draws
-already include it.
+- **Flexible machine-learning classifier.** Alternatively, train a binary
+    classifier on the same pooled training sample. Examples include deep learning
+    ([LeCun et al., 2015](https://doi.org/10.1038/nature14539)), random forest
+    ([Breiman, 2001](https://doi.org/10.1023/A:1010933404324)), and Bayesian additive
+    regression trees (BART; [Chipman et al., 2010](https://doi.org/10.1214/09-AOAS285)).
+    Each produces the held-out estimate
 
-```{r propensity-bart-function}
-predict_ps_bart <- function(training, validation, fold_seed, settings) {
-  if (!requireNamespace("dbarts", quietly = TRUE)) {
-    stop("Install dbarts to select ps_method = 'bart'.")
-  }
-  x <- ps_predictor_matrices(training, validation)
-  source_fraction <- min(max(mean(training$A), 0.01), 0.99)
-  fit <- dbarts::bart(
-    x.train = x$training, y.train = training$A, x.test = x$validation,
-    ntree = settings$bart_trees, ndpost = settings$bart_draws,
-    nskip = settings$bart_burn_in, k = settings$bart_shrinkage,
-    binaryOffset = qnorm(source_fraction),
-    seed = fold_seed, nthread = 1L, verbose = FALSE,
-    keeptrees = FALSE, keeptrainfits = FALSE
-  )
-  if (!is.null(fit$prob.test.mean)) {
-    return(as.numeric(fit$prob.test.mean))
-  }
-  if (!is.null(fit$prob.test)) {
-    return(as.numeric(colMeans(fit$prob.test)))
-  }
-  latent_draws <- fit[["yhat.test"]]
-  if (is.null(latent_draws)) {
-    stop("The BART fit did not return posterior validation predictions.")
-  }
-  as.numeric(colMeans(pnorm(latent_draws)))
-}
-```
+    \[
+    \widehat\pi^{(-k)}_{\mathrm{ML}}(X_i)
+    =\widehat{\Pr}(A_i=1\mid X_i).
+    \]
 
-For the neural network, predictor means and standard deviations are computed
-on the training fold. The same transformation is applied to held-out
-subjects. The two hidden layers use ReLU activations; the output is the
-estimated probability of source group 1. Its internal validation subset is
-drawn only from the outer training fold.
+    The functions below implement these alternatives directly. `"glm"` remains
+    the default; changing `ps_method` selects one learner. The fixed settings are
+    for this worked example, with no tuning. The optional packages are needed
+    only when their corresponding learner is selected. The MLP option also needs
+    the torch runtime installed.
 
-```{r propensity-mlp-function}
-predict_ps_mlp <- function(training, validation, fold_seed, settings) {
-  if (!requireNamespace("brulee", quietly = TRUE) ||
-      !requireNamespace("torch", quietly = TRUE)) {
-    stop("Install brulee and torch to select ps_method = 'mlp'.")
-  }
-  x <- ps_predictor_matrices(training, validation)
-  center <- colMeans(x$training)
-  spread <- apply(x$training, 2L, sd)
-  spread[!is.finite(spread) | spread < 1e-12] <- 1
-  train_frame <- as.data.frame(scale(x$training, center, spread))
-  valid_frame <- as.data.frame(scale(x$validation, center, spread))
-  names(train_frame) <- names(valid_frame) <-
-    make.names(names(train_frame), unique = TRUE)
-  train_frame$A <- factor(training$A, levels = c(0, 1))
+    ```{r propensity-settings}
+    ps_method <- "glm"                 # "glm", "rf", "bart", or "mlp"
+    ps_trim <- c(0.01, 0.99)
+    ps_settings <- list(
+      rf_trees = 100L, rf_min_node_size = 5L,
+      bart_trees = 50L, bart_draws = 500L, bart_burn_in = 200L,
+      bart_shrinkage = 2,
+      mlp_hidden_units = c(16L, 8L), mlp_epochs = 50L
+    )
+    ```
 
-  old_threads <- torch::torch_get_num_threads()
-  old_state <- torch::torch_get_rng_state()
-  on.exit({
-    torch::torch_set_rng_state(old_state)
-    torch::torch_set_num_threads(old_threads)
-  }, add = TRUE)
-  torch::torch_set_num_threads(1L)
-  torch::torch_manual_seed(fold_seed)
-  fit <- brulee::brulee_mlp(
-    A ~ ., data = train_frame,
-    hidden_units = settings$mlp_hidden_units,
-    epochs = settings$mlp_epochs, activation = "relu",
-    optimizer = "ADAMw", learn_rate = 0.01,
-    penalty = 0.001, dropout = 0.1,
-    batch_size = min(128L, nrow(train_frame)),
-    validation = 0.1, stop_iter = 10L,
-    device = "cpu", verbose = FALSE
-  )
-  as.numeric(predict(fit, new_data = valid_frame, type = "prob")[[".pred_1"]])
-}
-```
+    The random-forest classifier returns the probability of source group 1.
+
+    ```{r propensity-rf-function}
+    predict_ps_rf <- function(training, validation, fold_seed, settings) {
+      if (!requireNamespace("ranger", quietly = TRUE)) {
+        stop("Install ranger to select ps_method = 'rf'.")
+      }
+      training$A_factor <- factor(training$A, levels = c(0, 1))
+      fit <- ranger::ranger(
+        reformulate(X_names, response = "A_factor"), data = training,
+        probability = TRUE, num.trees = settings$rf_trees,
+        min.node.size = settings$rf_min_node_size,
+        mtry = max(1L, floor(sqrt(length(X_names)))),
+        seed = fold_seed, num.threads = 1L, oob.error = FALSE
+      )
+      as.numeric(predict(fit, data = validation[, X_names, drop = FALSE],
+                         num.threads = 1L)$predictions[, "1"])
+    }
+    ```
+
+    BART and the neural network use numeric predictor matrices. Factor coding
+    is determined from the training fold and applied unchanged to the validation
+    fold. Validation subjects do not determine factor levels or scaling values.
+
+    ```{r propensity-matrix-function}
+    ps_predictor_matrices <- function(training, validation) {
+      training <- training[, X_names, drop = FALSE]
+      validation <- validation[, X_names, drop = FALSE]
+      for (name in X_names) {
+        if (is.factor(training[[name]]) || is.character(training[[name]])) {
+          train_factor <- droplevels(factor(training[[name]]))
+          observed_levels <- levels(train_factor)
+          if (length(observed_levels) < 2L ||
+              any(!as.character(validation[[name]]) %in% observed_levels)) {
+            stop("A validation factor level is absent from its training fold.")
+          }
+          training[[name]] <- train_factor
+          validation[[name]] <- factor(as.character(validation[[name]]),
+                                       levels = observed_levels)
+        }
+      }
+      formula <- reformulate(X_names)
+      x_train <- model.matrix(formula, training)[, -1L, drop = FALSE]
+      x_valid <- model.matrix(formula, validation)[, -1L, drop = FALSE]
+      stopifnot(identical(colnames(x_train), colnames(x_valid)))
+      list(training = x_train, validation = x_valid)
+    }
+    ```
+
+    For binary BART with a probit link, probabilities are averaged over posterior
+    draws. The offset is supplied once when fitting; the returned latent draws
+    already include it.
+
+    ```{r propensity-bart-function}
+    predict_ps_bart <- function(training, validation, fold_seed, settings) {
+      if (!requireNamespace("dbarts", quietly = TRUE)) {
+        stop("Install dbarts to select ps_method = 'bart'.")
+      }
+      x <- ps_predictor_matrices(training, validation)
+      source_fraction <- min(max(mean(training$A), 0.01), 0.99)
+      fit <- dbarts::bart(
+        x.train = x$training, y.train = training$A, x.test = x$validation,
+        ntree = settings$bart_trees, ndpost = settings$bart_draws,
+        nskip = settings$bart_burn_in, k = settings$bart_shrinkage,
+        binaryOffset = qnorm(source_fraction),
+        seed = fold_seed, nthread = 1L, verbose = FALSE,
+        keeptrees = FALSE, keeptrainfits = FALSE
+      )
+      if (!is.null(fit$prob.test.mean)) {
+        return(as.numeric(fit$prob.test.mean))
+      }
+      if (!is.null(fit$prob.test)) {
+        return(as.numeric(colMeans(fit$prob.test)))
+      }
+      latent_draws <- fit[["yhat.test"]]
+      if (is.null(latent_draws)) {
+        stop("The BART fit did not return posterior validation predictions.")
+      }
+      as.numeric(colMeans(pnorm(latent_draws)))
+    }
+    ```
+
+    For the neural network, predictor means and standard deviations are computed
+    on the training fold. The same transformation is applied to held-out
+    subjects. The two hidden layers use ReLU activations; the output is the
+    estimated probability of source group 1. Its internal validation subset is
+    drawn only from the outer training fold.
+
+    ```{r propensity-mlp-function}
+    predict_ps_mlp <- function(training, validation, fold_seed, settings) {
+      if (!requireNamespace("brulee", quietly = TRUE) ||
+          !requireNamespace("torch", quietly = TRUE)) {
+        stop("Install brulee and torch to select ps_method = 'mlp'.")
+      }
+      x <- ps_predictor_matrices(training, validation)
+      center <- colMeans(x$training)
+      spread <- apply(x$training, 2L, sd)
+      spread[!is.finite(spread) | spread < 1e-12] <- 1
+      train_frame <- as.data.frame(scale(x$training, center, spread))
+      valid_frame <- as.data.frame(scale(x$validation, center, spread))
+      names(train_frame) <- names(valid_frame) <-
+        make.names(names(train_frame), unique = TRUE)
+      train_frame$A <- factor(training$A, levels = c(0, 1))
+
+      old_threads <- torch::torch_get_num_threads()
+      old_state <- torch::torch_get_rng_state()
+      on.exit({
+        torch::torch_set_rng_state(old_state)
+        torch::torch_set_num_threads(old_threads)
+      }, add = TRUE)
+      torch::torch_set_num_threads(1L)
+      torch::torch_manual_seed(fold_seed)
+      fit <- brulee::brulee_mlp(
+        A ~ ., data = train_frame,
+        hidden_units = settings$mlp_hidden_units,
+        epochs = settings$mlp_epochs, activation = "relu",
+        optimizer = "ADAMw", learn_rate = 0.01,
+        penalty = 0.001, dropout = 0.1,
+        batch_size = min(128L, nrow(train_frame)),
+        validation = 0.1, stop_iter = 10L,
+        device = "cpu", verbose = FALSE
+      )
+      as.numeric(predict(fit, new_data = valid_frame, type = "prob")[[".pred_1"]])
+    }
+    ```
 
 The common fold loop below applies the selected learner to
 $\mathcal J^{(-k)}$ and evaluates it on $\mathcal J^{(k)}$. The fold-specific
