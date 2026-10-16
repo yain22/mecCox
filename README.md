@@ -3,7 +3,6 @@
 # mecCox
 
 [![R package](https://img.shields.io/badge/R-%3E%3D%204.2.0-276DC3?logo=r&logoColor=white)](DESCRIPTION)
-[![R package check](https://github.com/yain22/mecCox/actions/workflows/R-CMD-check.yaml/badge.svg?branch=main)](https://github.com/yain22/mecCox/actions/workflows/R-CMD-check.yaml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 
 `mecCox` provides Cox regression methods for analyses with external controls
@@ -78,9 +77,6 @@ source(script)
 Replace `scenario1.R` with another filename from the table. Simulation run
 settings are near the top of each script. For the public case study's neural
 network, install the Torch runtime once with `torch::install_torch()`.
-
-To redraw Figures 5 and 6 from the [saved results](reproduction-data/final_main_L5_20261013),
-follow the [redraw instructions](inst/reproduce/FINAL_FIGURE_WORKFLOW.txt).
 
 The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 `survival`. Restricted SQUIRE/MSK-CHORD patient data are not included.

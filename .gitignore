@@ -12,3 +12,19 @@
 /toy-no-gain-output/
 /toy-example-output/
 inst/doc/
+
+# Local development files and saved results
+/.local-maintenance/
+/.github/
+/tests/
+/data-raw/
+/reproduction-data/
+/NEWS.md
+/inst/reproduce/original_study_helpers.R
+/inst/reproduce/study_reference/
+/inst/reproduce/final_figure_helpers.R
+/inst/reproduce/final_plot_reference/
+/inst/reproduce/redraw_final_figures.R
+/inst/reproduce/FINAL_FIGURE_WORKFLOW.txt
+/inst/reproduce/README.md
+/inst/reproduce/final_reference/README.md
