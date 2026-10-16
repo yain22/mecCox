@@ -10,11 +10,12 @@ output:
     highlight: tango
     self_contained: true
     math_method: mathml
+    code_folding: show
     code_download: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(collapse = TRUE, comment = "#>", error = FALSE)
+knitr::opts_chunk$set(collapse = FALSE, comment = "#>", error = FALSE)
 options(width = 88, digits = 6)
 ```
 
@@ -25,6 +26,11 @@ h2 { margin-top: 2em; }
 pre { font-size: 13px; }
 math[display="block"] { overflow-x: auto; padding: 0.5em 0; }
 table { margin: 1em 0; }
+.algorithm-box { border-top: 2px solid #333; border-bottom: 1px solid #333;
+                 padding: 0.6em 1em; margin: 1.5em 0; }
+.algorithm-box > p:first-child { border-bottom: 1px solid #777;
+                                padding-bottom: 0.5em; }
+.algorithm-box li { margin: 0.8em 0; padding-left: 0.25em; }
 </style>
 
 This manual follows **Steps 1–6 of Supplement S2.4, “Computation of the
@@ -54,6 +60,80 @@ The observed follow-up time and event indicator are stored in `time` and
 | $H_0,H_1,T_H$ | `H0`, `H1`, `T_H` | Cohort-specific feature matrices and target totals |
 | $\lambda,F(\lambda),J(\lambda)$ | `lambda`, `F`, `J` | Dual parameter, calibration residual, and Jacobian |
 | $\widehat w_i,\widetilde\omega_i$ | `w_hat`, `omega_tilde` | Calibrated control weights and final weights for all subjects |
+
+```{r data-structure, echo=FALSE, fig.width=10, fig.height=4.2, dpi=180, out.width="100%", fig.alt="Six simulated subject rows: three treated subjects with source A_i equal to 1, and three external controls with source A_i equal to 0. Columns are row index, source, age, sex, marker, observed time, and event indicator."}
+local({
+  example_env <- new.env()
+  data("example_external_controls", package = "mecCox", envir = example_env)
+  example_data <- example_env$example_external_controls
+  selected <- unlist(lapply(c(1L, 0L), function(a) {
+    sort(c(head(which(example_data$source == a & example_data$event == 1L), 2L),
+           head(which(example_data$source == a & example_data$event == 0L), 1L)))
+  }))
+  shown <- example_data[selected, ]
+  cells <- cbind(as.character(selected), as.character(shown$source),
+                 sprintf("%.2f", shown$age), as.character(shown$sex),
+                 sprintf("%.3f", shown$marker), sprintf("%.2f", shown$time),
+                 as.character(shown$event))
+
+  grid::grid.newpage()
+  widths <- c(0.075, 0.105, 0.11, 0.105, 0.12, 0.12, 0.105)
+  edges <- c(0.02, 0.02 + cumsum(widths))
+  centers <- head(edges, -1L) + widths / 2
+  border <- "#CDD3D8"
+  cohort_colors <- c("#188541", "#7635AD")
+  cohort_fills <- c("#EDF7EF", "#F4EFF9")
+  draw_cell <- function(j, y, height, label, fill, color = "#20262C",
+                        bold = FALSE, size = 12) {
+    grid::grid.rect(centers[j], y, width = widths[j], height = height,
+                    gp = grid::gpar(fill = fill, col = border, lwd = 0.7))
+    grid::grid.text(label, centers[j], y,
+                    gp = grid::gpar(col = color, fontsize = size,
+                                    fontface = if (bold) "bold" else "plain"))
+  }
+  headers <- list(expression(i), "source",
+                  "age", "sex", "marker", "time", "event")
+  for (j in seq_along(widths)) {
+    draw_cell(j, 0.91, 0.06, c("", LETTERS[1:6])[j], "#EDF0F3",
+              color = "#69727A", size = 11)
+    draw_cell(j, 0.835, 0.09, headers[[j]], "#F7F8FA", bold = TRUE)
+  }
+  for (r in seq_len(nrow(cells))) {
+    group <- if (shown$source[r] == 1L) 1L else 2L
+    y <- 0.79 - (r - 0.5) * 0.10
+    for (j in seq_along(widths)) {
+      draw_cell(j, y, 0.10, cells[r, j], cohort_fills[group],
+                color = if (j == 1L) cohort_colors[group] else "#20262C",
+                bold = j == 1L)
+    }
+    grid::grid.lines(x = rep(edges[1] + 0.003, 2), y = y + c(-0.042, 0.042),
+                     gp = grid::gpar(col = cohort_colors[group], lwd = 3))
+  }
+  for (group in 1:2) {
+    top <- 0.79 - (group - 1) * 0.30
+    bottom <- top - 0.30
+    grid::grid.lines(x = c(0.77, 0.78, 0.78, 0.77),
+                     y = c(top - 0.01, top - 0.01, bottom + 0.01, bottom + 0.01),
+                     gp = grid::gpar(col = cohort_colors[group], lwd = 1.5))
+    grid::grid.text(c("Treated", "External controls")[group],
+                    x = 0.80, y = (top + bottom) / 2 + 0.035, just = "left",
+                    gp = grid::gpar(col = cohort_colors[group], fontsize = 11,
+                                    fontface = "bold"))
+    grid::grid.text(if (group == 1L) expression(A[i] == 1)
+                    else expression(A[i] == 0),
+                    x = 0.80, y = (top + bottom) / 2 - 0.035, just = "left",
+                    gp = grid::gpar(col = cohort_colors[group], fontsize = 11))
+  }
+  grid::grid.text("One row per subject", x = 0.02, y = 0.10, just = "left",
+                  gp = grid::gpar(col = "#4D565F", fontsize = 11))
+  grid::grid.text("Baseline covariates: age, sex, marker", x = 0.35, y = 0.10,
+                  just = "left", gp = grid::gpar(col = "#4D565F", fontsize = 11))
+})
+```
+
+**Data structure.** Selected rows from the simulated example, with values rounded
+for display. The row index $i$ refers to the original dataset. `time` is the
+observed follow-up time; `event` is 1 for an observed event and 0 for right censoring.
 
 ```{r data}
 library(mecCox)
@@ -96,6 +176,22 @@ The calibration-feature vector is
 \left(1,\widehat S_0^{(-\kappa(i))}(t_1\mid X_i),\ldots,
 \widehat S_0^{(-\kappa(i))}(t_{p-1}\mid X_i)\right)\in\mathbb R^p.
 \]
+
+```{r cross-fitting-figure, echo=FALSE, out.width="100%", fig.alt="Figure S1: K-fold cross-fitting. Each row holds out one validation fold and trains the nuisance learners on the remaining folds, then evaluates out-of-fold predictions for the held-out subjects."}
+local({
+  figure <- "figures/cross-fitting.png"
+  if (!file.exists(figure)) {
+    figure <- paste0("https://raw.githubusercontent.com/yain22/mecCox/",
+                     "main/docs/figures/cross-fitting.png")
+  }
+  knitr::include_graphics(figure)
+})
+```
+
+**Figure S1.** Schematic illustration of $K$-fold cross-fitting, reproduced from
+the supplement. Within each training set, the propensity learner uses both
+cohorts and the control-survival learner uses external controls only. Both
+are evaluated on subjects in the held-out fold.
 
 For the Cox survival learner used here,
 
@@ -403,6 +499,72 @@ data.frame(log_hazard_ratio = theta_hat, hazard_ratio = HR_hat)
 This step illustrates the point estimator. For the MEC stacked-sandwich
 standard error and confidence interval, use `fit_mec_cox()` as below; the
 ordinary weighted `coxph()` standard error is not that variance estimator.
+
+## Algorithm summary
+
+::: {#algorithm-s1 .algorithm-box}
+
+**Algorithm S1. Computational algorithm for the MEC-Cox estimator**
+
+1. Partition the pooled sample into $K$ folds, stratified by the source indicator $A_i$.
+
+2. For each validation subject $i\in\mathcal J^{(k)}$, compute cross-fitted nuisance estimates
+
+    \[
+    \widehat\pi_i=\widehat\pi^{(-k)}(X_i),
+    \qquad
+    \widehat h_i=
+    \left(1,\widehat S_0^{(-k)}(t_1\mid X_i),\ldots,
+    \widehat S_0^{(-k)}(t_{p-1}\mid X_i)\right),
+    \]
+
+    where $\widehat\pi^{(-k)}$ is trained on $\mathcal J^{(-k)}$, and $\widehat S_0^{(-k)}$ is trained using external controls in $\mathcal I_0\cap\mathcal J^{(-k)}$.
+
+3. For $i\in\mathcal I_0$, define the normalized baseline ATT odds weight
+
+    \[
+    \widehat d_i=
+    \frac{n_1\widehat q_i}{\sum_{j\in\mathcal I_0}\widehat q_j},
+    \qquad
+    \widehat q_i=\frac{\widehat\pi_i}{1-\widehat\pi_i}.
+    \]
+
+4. Solve the dual calibration equation
+
+    \[
+    F(\lambda)=
+    \sum_{i\in\mathcal I_0}
+    \widehat h_i
+    g^{-1}\{g(\widehat d_i)+\lambda^\top\widehat h_i\}
+    -\sum_{i\in\mathcal I_1}\widehat h_i=0
+    \]
+
+    by a damped Newton solver, and denote the solution by $\widehat\lambda$.
+
+5. Recover the MEC-updated external-control weights and the final estimating-equation weights:
+
+    \[
+    \widehat w_i=
+    g^{-1}\{g(\widehat d_i)+\widehat\lambda^\top\widehat h_i\},
+    \qquad
+    \widetilde\omega_i=
+    \omega_i(\widehat\lambda)=
+    A_i+(1-A_i)\widehat w_i.
+    \]
+
+6. Report $\widehat{\mathrm{HR}}_{\mathrm{MEC}}=\exp(\widehat\theta_{\mathrm{MEC}})$ by solving
+
+    \[
+    U_n^{\mathrm{MEC}}(\theta)=
+    \sum_{i=1}^n\int\widetilde\omega_i
+    \{A_i-\overline A_{\mathrm{MEC},\omega}(t;\theta)\}
+    \,d\mathcal N_i(t)=0.
+    \]
+
+:::
+
+Algorithm lines 1–3 construct the inputs developed in Steps 1–2 above;
+line 4 combines Steps 3–5; and lines 5–6 give the final calculation in Step 6.
 
 ## Agreement with `fit_mec_cox()`
 
