@@ -35,11 +35,20 @@ h2 { margin-top: 2em; }
 pre { font-size: 13px; }
 math[display="block"] { overflow-x: auto; padding: 0.5em 0; }
 table { margin: 1em 0; }
-.manual-figure { margin: 1.5em 0; }
-.manual-figure > p { margin: 0; }
-.manual-figure figcaption { margin-top: 0.8em; font-size: 0.95em;
+.step-tag { background-color: #ffff73; color: #111; font-weight: 700;
+            padding: 0.05em 0.2em; white-space: nowrap; }
+.manual-figure { margin: 1.5em 0 2em; border: 1px solid #aab8c5;
+                 border-radius: 4px; background: #fff; }
+.manual-figure > p { margin: 0; padding: 1em; }
+.manual-figure > p > img { display: block; }
+.manual-figure figcaption { margin: 0; padding: 1em 1.1em;
+                            border-top: 1px solid #d5dde5;
+                            border-radius: 0 0 4px 4px;
+                            background: #f6f8fa; font-size: 0.95em;
                             line-height: 1.55; }
 .manual-figure figcaption p { margin: 0.6em 0; }
+.manual-figure figcaption p:first-child { margin-top: 0; }
+.manual-figure figcaption p:last-child { margin-bottom: 0; }
 .algorithm-box { border-top: 2px solid #333; border-bottom: 1px solid #333;
                  padding: 0.6em 1em; margin: 1.5em 0; }
 .algorithm-box > p:first-child { border-bottom: 1px solid #777;
@@ -413,7 +422,7 @@ example; the same times and folds will be used in the package comparison.
 
 ## 2. MEC-Cox implementation steps {#mec-cox-implementation-steps}
 
-### 2-1. Construction of the cross-fitted predictor basis {#step-1.-construction-of-the-cross-fitted-predictor-basis}
+### 2-1. [**[Step 1]**]{.step-tag} Construction of the cross-fitted predictor basis {#step-1.-construction-of-the-cross-fitted-predictor-basis}
 
 Partition the pooled sample into $K$ folds, stratified by $A_i$, and let
 $\kappa(i)\in\{1,\ldots,K\}$ identify the fold containing subject $i$.
@@ -686,7 +695,7 @@ feature. The final Cox model in Step 6 uses $A_i$ as its sole regression
 covariate.
 
 
-### 2-2. Baseline ATT odds weights {#step-2.-baseline-att-odds-weights}
+### 2-2. [**[Step 2]**]{.step-tag} Baseline ATT odds weights {#step-2.-baseline-att-odds-weights}
 
 We next construct the baseline weights around which the MEC calibration is
 performed. Using the same folds as in Step 1, estimate the source propensity
@@ -964,7 +973,7 @@ c(baseline_weight_total = sum(d_hat), treated_count = n1)
 `d_hat` contains external-control weights only, in the order of
 `I0`; changing the propensity learner leaves this construction unchanged.
 
-### 2-3. Formulation of the primal problem {#step-3.-formulation-of-the-primal-problem}
+### 2-3. [**[Step 3]**]{.step-tag} Formulation of the primal problem {#step-3.-formulation-of-the-primal-problem}
 
 Write the index sets as
 
@@ -1100,7 +1109,7 @@ data.frame(feature = colnames(H),
            row.names = NULL)
 ```
 
-### 2-4. Conversion to the dual problem {#step-4.-conversion-to-the-dual-problem}
+### 2-4. [**[Step 4]**]{.step-tag} Conversion to the dual problem {#step-4.-conversion-to-the-dual-problem}
 
 We next convert the constrained primal problem into a low-dimensional dual problem. Recall that the MEC-Cox calibration problem is
 
@@ -1247,7 +1256,7 @@ lambda0 <- numeric(p)
 stopifnot(max(abs(w_of_lambda(lambda0) - d_hat)) < 1e-12)
 ```
 
-### 2-5. Dual Newton solver {#step-5.-dual-newton-solver}
+### 2-5. [**[Step 5]**]{.step-tag} Dual Newton solver {#step-5.-dual-newton-solver}
 
 The Newton update is based on the Jacobian of $F(\lambda)$. We view the dual calibration map as
 
@@ -1421,7 +1430,7 @@ subjects. At each iteration, assembling the $p\times p$ Jacobian
 $J(\lambda)$ requires $O(n_0p^2)$ operations, and solving for the Newton
 step requires $O(p^3)$ operations.
 
-### 2-6. Final MEC-Cox estimator {#step-6.-final-mec-cox-estimator}
+### 2-6. [**[Step 6]**]{.step-tag} Final MEC-Cox estimator {#step-6.-final-mec-cox-estimator}
 
 After convergence of the dual Newton solver, let $\widehat\lambda$ denote the resulting dual
 solution and define the calibrated external-control weights by
@@ -1865,15 +1874,13 @@ $\eta_i$ from Supplement S2.5. This contribution includes both a subject's
 event and its effect on every weighted risk set in which it appears:
 
 \[
-\begin{aligned}
 \eta_i(\theta,\lambda)
-={}&\int \widetilde\omega_i(\lambda)
-       \{A_i-\overline A(t)\}\,d\mathcal N_i(t)\\
- &-\int\frac{\widetilde\omega_i(\lambda)\mathcal Y_i(t)e^{\theta A_i}
+=\int \widetilde\omega_i(\lambda)
+       \{A_i-\overline A(t)\}\,d\mathcal N_i(t)
+ -\int\frac{\widetilde\omega_i(\lambda)\mathcal Y_i(t)e^{\theta A_i}
                  \{A_i-\overline A(t)\}}
                 {S^{(0)}_\lambda(t;\theta)}
        \,d\mathcal N_{\omega,\lambda}(t),
-\end{aligned}
 \]
 
 where $d\mathcal N_{\omega,\lambda}(t)=
