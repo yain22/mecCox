@@ -1,6 +1,5 @@
 ---
 title: "MEC-Cox implementation"
-subtitle: "A worked example following Supplement S2.4"
 output:
   html_document:
     toc: true
@@ -1685,9 +1684,8 @@ For the standard comparators, `fit_att_ipw_cox()` fits a logistic-regression
 source propensity model once to the full pooled sample. It converts the fitted
 probabilities to external-control odds and normalizes these weights to sum to
 $n_1$, using the same odds-and-normalization construction as Step 2. Treated
-subjects retain weight one. The call below uses the same subjects, baseline
-covariates, and probability-clipping limits as the worked MEC-Cox example;
-the ATT-IPW function names its clipping argument `ps_clip`.
+subjects retain weight one. The call below uses the same subjects and baseline
+covariates as the worked MEC-Cox example.
 
 1. **Naive: ATT-IPW Cox with naive model-based variance.** This analysis
    uses the usual inverse-information variance from the weighted Cox partial
@@ -1774,31 +1772,6 @@ standard error because it uses calibrated weights and a different stacked
 estimating system. A smaller reported standard error in this example is a
 comparison of estimated uncertainty for these data; bias and coverage require
 the repeated-sampling evaluations presented in the paper.
-
-Probability clipping is performed before constructing the normalized ATT
-odds and does not remove subjects. For the corrected ATT-IPW sandwich, the
-logistic score and information use the original fitted GLM probabilities,
-while the Cox-to-logistic cross-derivative recomputes the clipped, normalized
-weights. When clipping is active, this is a local sandwich approximation away
-from the clipping boundaries. The diagnostic below reports how many fitted
-ATT-IPW probabilities were clipped and verifies the common weight normalization.
-
-```{r att-ipw-weight-diagnostics}
-stopifnot(
-  all(att_ipw$weights[I1] == 1),
-  abs(sum(att_ipw$weights[I0]) - n1) < 1e-6,
-  abs(sum(mec$weights[I0]) - n1) < 1e-6
-)
-
-knitr::kable(data.frame(
-  Quantity = c("Treated sample size (n1)",
-               "ATT-IPW external-control weight total",
-               "MEC-Cox external-control weight total",
-               "ATT-IPW fitted probabilities clipped"),
-  Value = c(n1, sum(att_ipw$weights[I0]), sum(mec$weights[I0]),
-            att_ipw$diagnostics$clipped_probability_count)
-), digits = 6, row.names = FALSE)
-```
 
 ### 4-3. KL cross-derivative: numerical and analytic calculation {#kl-cross-derivative-numerical-and-analytic-calculation}
 
