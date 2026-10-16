@@ -35,10 +35,12 @@ table { margin: 1em 0; }
 
 This manual follows **Steps 1–6 of Supplement S2.4, “Computation of the
 MEC-Cox Estimator via the Dual Newton Solver,”** in the same order and with
-the same notation. Each formula is followed by the R code that implements it.
-The example uses the package's simulated data, logistic regression for source
-propensity, Cox regression for control survival, and the Kullback–Leibler (KL)
-generator. The general generator notation from the supplement is retained.
+the same notation. Each step retains the supplement's derivation and is followed
+by the corresponding R code.
+The default example uses the package's simulated data, logistic regression for
+source propensity, Cox regression for control survival, and the Kullback–Leibler
+(KL) generator. Steps 1 and 2 also provide executable RSF and machine-learning
+alternatives. The general generator notation from the supplement is retained.
 
 [R Markdown source](https://github.com/yain22/mecCox/blob/main/docs/mec-cox-implementation.Rmd)
 · [Package repository](https://github.com/yain22/mecCox)
@@ -166,10 +168,13 @@ example; the same times and folds will be used in the package comparison.
 ## Step 1. Construction of the cross-fitted predictor basis
 
 Partition the pooled sample into $K$ folds, stratified by $A_i$, and let
-$\kappa(i)$ identify the fold containing subject $i$. For each fold $k$, train
-the control-survival learner using only $\mathcal I_0\cap\mathcal J^{(-k)}$,
-then predict survival for **all** subjects in the held-out fold $\mathcal J^{(k)}$.
-The calibration-feature vector is
+$\kappa(i)\in\{1,\ldots,K\}$ identify the fold containing subject $i$.
+Thus $i\in\mathcal J^{(\kappa(i))}$, and the training set for fold $k$ is
+$\mathcal J^{(-k)}=\{1,\ldots,n\}\setminus\mathcal J^{(k)}$.
+For each fold $k$, train the control-survival learner using only the external
+controls in $\mathcal I_0\cap\mathcal J^{(-k)}$, then evaluate it for **all**
+subjects in the held-out fold $\mathcal J^{(k)}$. Define the cross-fitted
+calibration-feature vector
 
 \[
 \widehat h_i=
@@ -177,139 +182,624 @@ The calibration-feature vector is
 \widehat S_0^{(-\kappa(i))}(t_{p-1}\mid X_i)\right)\in\mathbb R^p.
 \]
 
-```{r cross-fitting-figure, echo=FALSE, out.width="100%", fig.alt="Figure S1: K-fold cross-fitting. Each row holds out one validation fold and trains the nuisance learners on the remaining folds, then evaluates out-of-fold predictions for the held-out subjects."}
-local({
-  figure <- "figures/cross-fitting.png"
-  if (!file.exists(figure)) {
-    figure <- paste0("https://raw.githubusercontent.com/yain22/mecCox/",
-                     "main/docs/figures/cross-fitting.png")
-  }
-  knitr::include_graphics(figure)
-})
+Here $L=p-1$ is the number of landmark times. Every non-intercept component
+is an out-of-sample prediction for subject $i$.
+
+```{tikz cross-fitting-figure, echo=FALSE, dev='svg', out.width='100%', fig.alt='K-fold cross-fitting. Each row holds out one validation fold, trains nuisance learners on the other folds, and evaluates predictions for the held-out subjects.', engine.opts=list(classoption='tikz,border=3pt', extra.preamble=c('\\usepackage[T1]{fontenc}', '\\usepackage{times}', '\\usepackage[defaultmathsizes,italic]{mathastext}', '\\usetikzlibrary{arrows.meta,calc,decorations.pathreplacing}'), dvisvgm.opts=c('--no-fonts', '--bbox=papersize'))}
+\begin{tikzpicture}[
+    >=Latex,
+    font=\scriptsize,
+    fold/.style={draw, rectangle, minimum width=2.1cm, minimum height=1.0cm, align=center},
+    val/.style={fold, fill=blue!15},
+    train/.style={fold, fill=gray!15},
+    proc/.style={draw, rounded corners, rectangle, minimum width=2.2cm, minimum height=0.95cm, align=center}
+]
+
+\node[blue!70!black, anchor=west] at (-1.8,1.5) {Validation folds};
+
+\node at (4.6,1.7) {$\{1,\ldots,n\}=\mathcal J^{(1)}\cup\cdots\cup\mathcal J^{(K)}$};
+
+\foreach \x/\lab in {0/{\(\mathcal J^{(1)}\)}, 2.3/{\(\mathcal J^{(2)}\)}, 4.6/{\(\mathcal J^{(3)}\)}, 6.9/{\(\cdots\)}, 9.2/{\(\mathcal J^{(K)}\)}}{
+    \node[fold] at (\x,0.8) {\lab};
+}
+
+% Row k=1
+\node[anchor=east] at (-1.0,-0.8) {$k=1$};
+
+\node[val]   (r11) at (0,-0.8)   {validation\\[0.3mm] \(\mathcal J^{(1)}\)};
+\node[train] (r12) at (2.3,-0.8) {training\\[0.3mm] \(\mathcal J^{(-1)}\)};
+\node[train] (r13) at (4.6,-0.8) {training\\[0.3mm] \(\mathcal J^{(-1)}\)};
+\node[train] (r14) at (6.9,-0.8) {\(\cdots\)};
+\node[train] (r15) at (9.2,-0.8) {training\\[0.3mm] \(\mathcal J^{(-1)}\)};
+
+\draw[decorate,decoration={brace,mirror,amplitude=5pt}]
+    ($(r12.south west)+(0,-0.05)$) -- ($(r15.south east)+(0,-0.05)$)
+    node[midway, below=8pt] {training: \(\mathcal J^{(-1)}=\{1,\ldots,n\}\setminus\mathcal J^{(1)}\)};
+
+\node[proc] (fit1) at (12.4,-0.8) {Fit\\ nuisance\\ learners};
+\node[proc, draw=blue!70!black, text=blue!70!black] (eval1) at (15.5,-0.8)
+{Evaluate\\ out-of-fold\\ predictions};
+
+\draw[->] (10.35,-0.8) -- (fit1.west);
+\draw[->] (fit1.east) -- (eval1.west);
+
+% Row k=2
+\node[anchor=east] at (-1.0,-3.0) {$k=2$};
+
+\node[train] (r21) at (0,-3.0)   {training\\[0.3mm] \(\mathcal J^{(-2)}\)};
+\node[val]   (r22) at (2.3,-3.0) {validation\\[0.3mm] \(\mathcal J^{(2)}\)};
+\node[train] (r23) at (4.6,-3.0) {training\\[0.3mm] \(\mathcal J^{(-2)}\)};
+\node[train] (r24) at (6.9,-3.0) {\(\cdots\)};
+\node[train] (r25) at (9.2,-3.0) {training\\[0.3mm] \(\mathcal J^{(-2)}\)};
+
+\draw[decorate,decoration={brace,mirror,amplitude=5pt}]
+    ($(r21.south west)+(0,-0.05)$) -- ($(r25.south east)+(0,-0.05)$)
+    node[midway, below=8pt] {training: \(\mathcal J^{(-2)}=\{1,\ldots,n\}\setminus\mathcal J^{(2)}\)};
+
+\node[proc] (fit2) at (12.4,-3.0) {Fit\\ nuisance\\ learners};
+\node[proc, draw=blue!70!black, text=blue!70!black] (eval2) at (15.5,-3.0)
+{Evaluate\\ out-of-fold\\ predictions};
+
+\draw[->] (10.35,-3.0) -- (fit2.west);
+\draw[->] (fit2.east) -- (eval2.west);
+
+% Dots
+\node at (-1.0,-5.0) {\(\vdots\)};
+\node at (4.6,-5.0) {\(\vdots\)};
+\node at (12.4,-5.0) {\(\vdots\)};
+\node at (15.5,-5.0) {\(\vdots\)};
+
+% Row k=K
+\node[anchor=east] at (-1.0,-6.7) {$k=K$};
+
+\node[train] (rK1) at (0,-6.7)   {training\\[0.3mm] \(\mathcal J^{(-K)}\)};
+\node[train] (rK2) at (2.3,-6.7) {training\\[0.3mm] \(\mathcal J^{(-K)}\)};
+\node[train] (rK3) at (4.6,-6.7) {training\\[0.3mm] \(\mathcal J^{(-K)}\)};
+\node[train] (rK4) at (6.9,-6.7) {\(\cdots\)};
+\node[val]   (rK5) at (9.2,-6.7) {validation\\[0.3mm] \(\mathcal J^{(K)}\)};
+
+\draw[decorate,decoration={brace,mirror,amplitude=5pt}]
+    ($(rK1.south west)+(0,-0.05)$) -- ($(rK4.south east)+(0,-0.05)$)
+    node[midway, below=8pt] {training: \(\mathcal J^{(-K)}=\{1,\ldots,n\}\setminus\mathcal J^{(K)}\)};
+
+\node[proc] (fitK) at (12.4,-6.7) {Fit\\ nuisance\\ learners};
+\node[proc, draw=blue!70!black, text=blue!70!black] (evalK) at (15.5,-6.7)
+{Evaluate\\ out-of-fold\\ predictions};
+
+\draw[->] (10.35,-6.7) -- (fitK.west);
+\draw[->] (fitK.east) -- (evalK.west);
+
+\end{tikzpicture}
 ```
 
-**Figure S1.** Schematic illustration of $K$-fold cross-fitting, reproduced from
-the supplement. Within each training set, the propensity learner uses both
-cohorts and the control-survival learner uses external controls only. Both
-are evaluated on subjects in the held-out fold.
+**Figure S1.** Schematic illustration of $K$-fold cross-fitting, drawn from
+the supplement's editable TikZ code. Within each training set, the propensity
+learner uses both cohorts and the control-survival learner uses external
+controls only. Both are evaluated on subjects in the held-out fold.
 
-For the Cox survival learner used here,
+The same fold assignment is used for both learners throughout the calculation.
 
-\[
-\widehat S_{0,\mathrm{Cox}}^{(-k)}(t_\ell\mid X_i)=
-\exp\left[-\widehat\Lambda_{00}^{(-k)}(t_\ell)
-\exp\{X_i^\top\widehat\beta_0^{(-k)}\}\right].
-\]
-
-```{r predictor-basis}
+```{r cross-fitting-folds}
 set.seed(seed)
 kappa <- integer(n)
 for (a in c(0L, 1L)) {
   rows <- which(A == a)
   kappa[rows] <- sample(rep(seq_len(K), length.out = length(rows)))
 }
+```
 
-S0_hat <- matrix(NA_real_, nrow = n, ncol = L)
-survival_formula <- reformulate(X_names, response = "Surv(time, event)")
+We consider two implementations of the control-survival learner.
 
-for (k in seq_len(K)) {
-  train0 <- which(kappa != k & A == 0L)
-  valid <- which(kappa == k)
+**Cox proportional hazards regression** ([Cox, 1972](https://doi.org/10.1111/j.2517-6161.1972.tb00899.x); [Cox, 1975](https://doi.org/10.1093/biomet/62.2.269)). Fit the working model among the
+external-control subjects in the training fold,
 
+\[
+\lambda_0^{(-k)}(t\mid X)
+=\lambda_{00}^{(-k)}(t)\exp\{X^\top\beta_0^{(-k)}\},
+\qquad i\in\mathcal I_0\cap\mathcal J^{(-k)}.
+\]
+
+Let $\widehat\beta_0^{(-k)}$ and
+$\widehat\Lambda_{00}^{(-k)}(t)$ denote its fitted regression coefficient
+and baseline cumulative hazard estimator. For a validation subject,
+
+\[
+\widehat S_{0,\mathrm{Cox}}^{(-k)}(t_\ell\mid X_i)
+=\exp\left[-\widehat\Lambda_{00}^{(-k)}(t_\ell)
+\exp\{X_i^\top\widehat\beta_0^{(-k)}\}\right],
+\qquad \ell=1,\ldots,L.
+\]
+
+```{r survival-cox-function}
+predict_survival_cox <- function(training0, validation, fold_seed, settings) {
+  survival_formula <- reformulate(X_names, response = "Surv(time, event)")
   outcome_fit <- coxph(
-    survival_formula, data = dat[train0, ],
+    survival_formula, data = training0,
     ties = "breslow", x = TRUE, singular.ok = FALSE,
     control = coxph.control(timefix = FALSE)
   )
-
-  # Evaluate the baseline cumulative hazard at each landmark.
   baseline <- basehaz(outcome_fit, centered = FALSE)
   j <- findInterval(t_landmark, baseline$time)
   Lambda00_hat <- numeric(L)
   Lambda00_hat[j > 0L] <- baseline$hazard[j[j > 0L]]
-
-  # Uncentered linear predictors match the uncentered baseline hazard.
-  lp <- predict(outcome_fit, newdata = dat[valid, ],
+  lp <- predict(outcome_fit, newdata = validation,
                 type = "lp", reference = "zero")
-  S0_hat[valid, ] <- exp(-outer(exp(lp), Lambda00_hat))
+  exp(-outer(exp(lp), Lambda00_hat))
 }
+```
 
+The uncentered linear predictors are paired with the uncentered baseline
+cumulative hazard. At each landmark, the code uses the most recent cumulative
+hazard value; before the first event the hazard is zero and survival is one.
+
+**Random survival forest (RSF)** ([Ishwaran et al., 2008](https://doi.org/10.1214/08-AOAS169)). Alternatively, fit an RSF on the same
+external-control training subjects. For each tree $b=1,\ldots,B$, let
+$\widehat\Lambda_{0b}^{(-k)}(t\mid X_i)$ denote the terminal-node cumulative
+hazard estimate for a validation subject. The `ranger` implementation averages
+these cumulative hazards and then converts the result to survival:
+
+\[
+\widehat S_{0,\mathrm{RSF}}^{(-k)}(t_\ell\mid X_i)
+=\exp\left\{-\frac{1}{B}\sum_{b=1}^{B}
+\widehat\Lambda_{0b}^{(-k)}(t_\ell\mid X_i)\right\},
+\qquad \ell=1,\ldots,L.
+\]
+
+This gives a flexible, nonparametric estimate of the conditional control
+survival function at the same landmark times. The function below uses the
+forest survival output directly and evaluates its step function at those times.
+
+```{r survival-rsf-function}
+predict_survival_rsf <- function(training0, validation, fold_seed, settings) {
+  if (!requireNamespace("ranger", quietly = TRUE)) {
+    stop("Install ranger to select survival_method = 'rsf'.")
+  }
+  training_frame <- training0[, c("time", "event", X_names), drop = FALSE]
+  forest <- ranger::ranger(
+    Surv(time, event) ~ ., data = training_frame,
+    num.trees = settings$num_trees,
+    min.node.size = settings$min_node_size,
+    mtry = max(1L, floor(sqrt(length(X_names)))),
+    splitrule = "logrank", num.random.splits = 1L,
+    replace = TRUE, sample.fraction = 1,
+    write.forest = TRUE, oob.error = FALSE,
+    seed = fold_seed, num.threads = 1L
+  )
+  prediction <- predict(forest,
+    data = validation[, X_names, drop = FALSE], num.threads = 1L
+  )
+  j <- findInterval(t_landmark, prediction$unique.death.times)
+  S <- matrix(1, nrow = nrow(validation), ncol = L)
+  observed <- which(j > 0L)
+  if (length(observed)) {
+    S[, observed] <- prediction$survival[, j[observed], drop = FALSE]
+  }
+  S
+}
+```
+
+Choose the survival learner below. The default is Cox; the fixed RSF settings
+provide an executable alternative for this worked example, with no tuning.
+
+```{r survival-settings}
+survival_method <- "cox"             # "cox" or "rsf"
+rsf_settings <- list(num_trees = 100L, min_node_size = 15L)
+```
+
+```{r predictor-basis}
+predict_survival <- switch(survival_method,
+  cox = predict_survival_cox, rsf = predict_survival_rsf,
+  stop("Choose survival_method from cox and rsf.")
+)
+S0_hat <- matrix(NA_real_, nrow = n, ncol = L)
+for (k in seq_len(K)) {
+  train0 <- which(kappa != k & A == 0L)
+  valid <- which(kappa == k)
+  S0_hat[valid, ] <- predict_survival(
+    dat[train0, ], dat[valid, ], as.integer(seed + k), rsf_settings
+  )
+}
 colnames(S0_hat) <- paste0("S0(t=", t_landmark, ")")
 H <- cbind(intercept = 1, S0_hat)
 stopifnot(all(is.finite(H)), all(S0_hat >= 0 & S0_hat <= 1))
 head(H, 3)
 ```
 
-Each row is predicted without using that subject to train the survival model.
-These predictions enter the calibration features; the final Cox model in Step 6
-uses the source indicator $A_i$ as its sole regression covariate.
+In both cases, the predictor basis summarizes the estimated counterfactual
+control-survival profile for each subject and is used only as a calibration
+feature. The final Cox model in Step 6 uses $A_i$ as its sole regression
+covariate.
+
 
 ## Step 2. Baseline ATT odds weights
 
-Using the same folds, fit the source propensity model on the **pooled training
-sample** $\mathcal J^{(-k)}$. Evaluate it on $\mathcal J^{(k)}$ to obtain
-$\widehat\pi_i=\widehat\pi^{(-k)}(X_i)$.
-For $i\in\mathcal I_0$, form
+We next construct the baseline weights around which the MEC calibration is
+performed. Using the same folds as in Step 1, estimate the source propensity
+score
+
+\[
+\pi(X_i)=\Pr(A_i=1\mid X_i)
+\]
+
+on the **pooled training sample** $\mathcal J^{(-k)}$. Write the fitted learner
+as $\widehat\pi^{(-k)}(X)$. For a subject in the held-out fold
+$i\in\mathcal J^{(k)}$, the cross-fitted prediction is
+
+\[
+\widehat\pi_i=\widehat\pi^{(-k)}(X_i),
+\]
+
+possibly truncated away from zero and one. Thus, each subject's prediction is
+obtained without using that subject to train the propensity learner.
+
+For external-control subjects $i\in\mathcal I_0$, form the estimated ATT
+odds and normalize them to have total mass equal to the treated cohort size:
 
 \[
 \widehat q_i=\frac{\widehat\pi_i}{1-\widehat\pi_i},
 \qquad
 \widehat d_i=\frac{n_1\widehat q_i}
-{\sum_{j\in\mathcal I_0}\widehat q_j},
+ {\sum_{j\in\mathcal I_0}\widehat q_j},
 \qquad
 \sum_{i\in\mathcal I_0}\widehat d_i=n_1.
 \]
 
-```{r baseline-weights}
-pi_hat <- numeric(n)
-propensity_formula <- reformulate(X_names, response = "A")
+These normalized odds weights are the baseline for the Bregman calibration
+in Step 3. We consider two implementations of the source propensity-score learner.
 
+**Logistic regression.** The GLM working model is
+
+\[
+\pi_\gamma(X_i)
+=\frac{\exp(\gamma^\top\widetilde X_i)}
+       {1+\exp(\gamma^\top\widetilde X_i)},
+\]
+
+where $\widetilde X_i$ contains an intercept and the selected baseline
+covariates. Fitting it on $\mathcal J^{(-k)}$ gives $\widehat\gamma^{(-k)}$,
+and the held-out prediction is
+
+\[
+\widehat\pi^{(-k)}_{\mathrm{glm}}(X_i)
+=\frac{\exp\{(\widehat\gamma^{(-k)})^\top\widetilde X_i\}}
+       {1+\exp\{(\widehat\gamma^{(-k)})^\top\widetilde X_i\}}.
+\]
+
+```{r propensity-glm-function}
+predict_ps_glm <- function(training, validation, fold_seed, settings) {
+  fit <- glm(reformulate(X_names, response = "A"),
+             data = training, family = binomial())
+  stopifnot(isTRUE(fit$converged), all(is.finite(coef(fit))))
+  as.numeric(predict(fit, newdata = validation, type = "response"))
+}
+```
+
+**Flexible machine-learning classifier.** Alternatively, train a binary
+classifier on the same pooled training sample. Examples include deep learning
+([LeCun et al., 2015](https://doi.org/10.1038/nature14539)), random forest
+([Breiman, 2001](https://doi.org/10.1023/A:1010933404324)), and Bayesian additive
+regression trees (BART; [Chipman et al., 2010](https://doi.org/10.1214/09-AOAS285)).
+Each produces the held-out estimate
+
+\[
+\widehat\pi^{(-k)}_{\mathrm{ML}}(X_i)
+=\widehat{\Pr}(A_i=1\mid X_i).
+\]
+
+The functions below implement these alternatives directly. `"glm"` remains
+the default; changing `ps_method` selects one learner. The fixed settings are
+for this worked example, with no tuning. The optional packages are needed
+only when their corresponding learner is selected. The MLP option also needs
+the torch runtime installed.
+
+```{r propensity-settings}
+ps_method <- "glm"                 # "glm", "rf", "bart", or "mlp"
+ps_trim <- c(0.01, 0.99)
+ps_settings <- list(
+  rf_trees = 100L, rf_min_node_size = 5L,
+  bart_trees = 50L, bart_draws = 500L, bart_burn_in = 200L,
+  bart_shrinkage = 2,
+  mlp_hidden_units = c(16L, 8L), mlp_epochs = 50L
+)
+```
+
+The random-forest classifier returns the probability of source group 1.
+
+```{r propensity-rf-function}
+predict_ps_rf <- function(training, validation, fold_seed, settings) {
+  if (!requireNamespace("ranger", quietly = TRUE)) {
+    stop("Install ranger to select ps_method = 'rf'.")
+  }
+  training$A_factor <- factor(training$A, levels = c(0, 1))
+  fit <- ranger::ranger(
+    reformulate(X_names, response = "A_factor"), data = training,
+    probability = TRUE, num.trees = settings$rf_trees,
+    min.node.size = settings$rf_min_node_size,
+    mtry = max(1L, floor(sqrt(length(X_names)))),
+    seed = fold_seed, num.threads = 1L, oob.error = FALSE
+  )
+  as.numeric(predict(fit, data = validation[, X_names, drop = FALSE],
+                     num.threads = 1L)$predictions[, "1"])
+}
+```
+
+BART and the neural network use numeric predictor matrices. Factor coding
+is determined from the training fold and applied unchanged to the validation
+fold. Validation subjects do not determine factor levels or scaling values.
+
+```{r propensity-matrix-function}
+ps_predictor_matrices <- function(training, validation) {
+  training <- training[, X_names, drop = FALSE]
+  validation <- validation[, X_names, drop = FALSE]
+  for (name in X_names) {
+    if (is.factor(training[[name]]) || is.character(training[[name]])) {
+      train_factor <- droplevels(factor(training[[name]]))
+      observed_levels <- levels(train_factor)
+      if (length(observed_levels) < 2L ||
+          any(!as.character(validation[[name]]) %in% observed_levels)) {
+        stop("A validation factor level is absent from its training fold.")
+      }
+      training[[name]] <- train_factor
+      validation[[name]] <- factor(as.character(validation[[name]]),
+                                   levels = observed_levels)
+    }
+  }
+  formula <- reformulate(X_names)
+  x_train <- model.matrix(formula, training)[, -1L, drop = FALSE]
+  x_valid <- model.matrix(formula, validation)[, -1L, drop = FALSE]
+  stopifnot(identical(colnames(x_train), colnames(x_valid)))
+  list(training = x_train, validation = x_valid)
+}
+```
+
+For binary BART with a probit link, probabilities are averaged over posterior
+draws. The offset is supplied once when fitting; the returned latent draws
+already include it.
+
+```{r propensity-bart-function}
+predict_ps_bart <- function(training, validation, fold_seed, settings) {
+  if (!requireNamespace("dbarts", quietly = TRUE)) {
+    stop("Install dbarts to select ps_method = 'bart'.")
+  }
+  x <- ps_predictor_matrices(training, validation)
+  source_fraction <- min(max(mean(training$A), 0.01), 0.99)
+  fit <- dbarts::bart(
+    x.train = x$training, y.train = training$A, x.test = x$validation,
+    ntree = settings$bart_trees, ndpost = settings$bart_draws,
+    nskip = settings$bart_burn_in, k = settings$bart_shrinkage,
+    binaryOffset = qnorm(source_fraction),
+    seed = fold_seed, nthread = 1L, verbose = FALSE,
+    keeptrees = FALSE, keeptrainfits = FALSE
+  )
+  if (!is.null(fit$prob.test.mean)) {
+    return(as.numeric(fit$prob.test.mean))
+  }
+  if (!is.null(fit$prob.test)) {
+    return(as.numeric(colMeans(fit$prob.test)))
+  }
+  latent_draws <- fit[["yhat.test"]]
+  if (is.null(latent_draws)) {
+    stop("The BART fit did not return posterior validation predictions.")
+  }
+  as.numeric(colMeans(pnorm(latent_draws)))
+}
+```
+
+For the neural network, predictor means and standard deviations are computed
+on the training fold. The same transformation is applied to held-out
+subjects. The two hidden layers use ReLU activations; the output is the
+estimated probability of source group 1. Its internal validation subset is
+drawn only from the outer training fold.
+
+```{r propensity-mlp-function}
+predict_ps_mlp <- function(training, validation, fold_seed, settings) {
+  if (!requireNamespace("brulee", quietly = TRUE) ||
+      !requireNamespace("torch", quietly = TRUE)) {
+    stop("Install brulee and torch to select ps_method = 'mlp'.")
+  }
+  x <- ps_predictor_matrices(training, validation)
+  center <- colMeans(x$training)
+  spread <- apply(x$training, 2L, sd)
+  spread[!is.finite(spread) | spread < 1e-12] <- 1
+  train_frame <- as.data.frame(scale(x$training, center, spread))
+  valid_frame <- as.data.frame(scale(x$validation, center, spread))
+  names(train_frame) <- names(valid_frame) <-
+    make.names(names(train_frame), unique = TRUE)
+  train_frame$A <- factor(training$A, levels = c(0, 1))
+
+  old_threads <- torch::torch_get_num_threads()
+  old_state <- torch::torch_get_rng_state()
+  on.exit({
+    torch::torch_set_rng_state(old_state)
+    torch::torch_set_num_threads(old_threads)
+  }, add = TRUE)
+  torch::torch_set_num_threads(1L)
+  torch::torch_manual_seed(fold_seed)
+  fit <- brulee::brulee_mlp(
+    A ~ ., data = train_frame,
+    hidden_units = settings$mlp_hidden_units,
+    epochs = settings$mlp_epochs, activation = "relu",
+    optimizer = "ADAMw", learn_rate = 0.01,
+    penalty = 0.001, dropout = 0.1,
+    batch_size = min(128L, nrow(train_frame)),
+    validation = 0.1, stop_iter = 10L,
+    device = "cpu", verbose = FALSE
+  )
+  as.numeric(predict(fit, new_data = valid_frame, type = "prob")[[".pred_1"]])
+}
+```
+
+The common fold loop below applies the selected learner to
+$\mathcal J^{(-k)}$ and evaluates it on $\mathcal J^{(k)}$. The fold-specific
+seed controls stochastic learners; it does not change the shared fold
+assignment `kappa` constructed in Step 1.
+
+```{r propensity-seed-function}
+with_ps_seed <- function(value, expression) {
+  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  if (had_seed) old_seed <- get(".Random.seed", envir = .GlobalEnv)
+  on.exit({
+    if (had_seed) assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+  set.seed(value)
+  force(expression)
+}
+```
+
+```{r cross-fitted-propensity}
+predict_ps <- switch(ps_method,
+  glm = predict_ps_glm, rf = predict_ps_rf,
+  bart = predict_ps_bart, mlp = predict_ps_mlp,
+  stop("Choose ps_method from glm, rf, bart, and mlp.")
+)
+pi_hat <- numeric(n)
 for (k in seq_len(K)) {
   train <- which(kappa != k)
   valid <- which(kappa == k)
-  propensity_fit <- glm(propensity_formula, data = dat[train, ],
-                        family = binomial())
-  stopifnot(isTRUE(propensity_fit$converged))
-  pi_hat[valid] <- predict(propensity_fit, newdata = dat[valid, ],
-                           type = "response")
+  fold_seed <- as.integer(seed + k)
+  held_out <- with_ps_seed(fold_seed,
+    predict_ps(dat[train, ], dat[valid, ], fold_seed, ps_settings)
+  )
+  stopifnot(length(held_out) == length(valid), all(is.finite(held_out)),
+            all(held_out >= 0 & held_out <= 1))
+  pi_hat[valid] <- held_out
 }
-
-ps_trim <- c(0.01, 0.99)
 pi_hat <- pmin(pmax(pi_hat, ps_trim[1]), ps_trim[2])
+```
+
+Using the held-out predictions, compute the normalized baseline weights defined above.
+
+```{r baseline-weights}
 q_hat <- pi_hat[I0] / (1 - pi_hat[I0])
 d_hat <- n1 * q_hat / sum(q_hat)
-
 stopifnot(all(is.finite(d_hat)), all(d_hat > 0))
 c(baseline_weight_total = sum(d_hat), treated_count = n1)
 ```
 
-The truncation bounds are explicit so that the hand calculation and the package
-use the same propensity scores. `d_hat` contains external-control weights only,
-in the order specified by `I0`.
+`d_hat` contains external-control weights only, in the order of
+`I0`; changing the propensity learner leaves this construction unchanged.
 
 ## Step 3. Formulation of the primal problem
 
-Stack the rows $\widehat h_i$ within each cohort to obtain
-$H_0\in\mathbb R^{n_0\times p}$ and $H_1\in\mathbb R^{n_1\times p}$.
-The target calibration total is
+Write the index sets as
 
 \[
-T_H=H_1^\top\mathbf 1_{n_1}
-=\sum_{i\in\mathcal I_1}\widehat h_i\in\mathbb R^p.
+\mathcal I_0=\{i_1^0,\ldots,i_{n_0}^0\},
+\qquad
+\mathcal I_1=\{i_1^1,\ldots,i_{n_1}^1\},
 \]
 
-The primal problem is
+where $i_m^0$ denotes the index of the $m$th external-control subject and $i_m^1$ denotes the index of the $m$th treated subject.
+
+Stacking the vectors $\widehat h_i$ obtained in Step 1 as rows within each cohort, define the calibration-feature matrices
 
 \[
-\widehat w=\arg\min_{\{w_i>0:i\in\mathcal I_0\}}
-\sum_{i\in\mathcal I_0}D_G(w_i\|\widehat d_i)
-\quad\text{subject to}\quad H_0^\top w=T_H,
+H_0
+=
+\begin{pmatrix}
+\widehat h_{i_1^0}\\
+\vdots\\
+\widehat h_{i_{n_0}^0}
+\end{pmatrix}
+=
+\begin{pmatrix}
+1 & \widehat S_0^{(-\kappa(i_1^0))}(t_1\mid X_{i_1^0}) & \cdots & \widehat S_0^{(-\kappa(i_1^0))}(t_{p-1}\mid X_{i_1^0})\\
+\vdots & \vdots & \ddots & \vdots\\
+1 & \widehat S_0^{(-\kappa(i_{n_0}^0))}(t_1\mid X_{i_{n_0}^0}) & \cdots & \widehat S_0^{(-\kappa(i_{n_0}^0))}(t_{p-1}\mid X_{i_{n_0}^0})
+\end{pmatrix}
+\in\mathbb R^{n_0\times p},
 \]
 
-where $D_G(w_i\|\widehat d_i)=G(w_i)-G(\widehat d_i)
--g(\widehat d_i)(w_i-\widehat d_i)$, $G$ is strictly convex, and $g=G'$.
+and
+
+\[
+H_1
+=
+\begin{pmatrix}
+\widehat h_{i_1^1}\\
+\vdots\\
+\widehat h_{i_{n_1}^1}
+\end{pmatrix}
+=
+\begin{pmatrix}
+1 & \widehat S_0^{(-\kappa(i_1^1))}(t_1\mid X_{i_1^1}) & \cdots & \widehat S_0^{(-\kappa(i_1^1))}(t_{p-1}\mid X_{i_1^1})\\
+\vdots & \vdots & \ddots & \vdots\\
+1 & \widehat S_0^{(-\kappa(i_{n_1}^1))}(t_1\mid X_{i_{n_1}^1}) & \cdots & \widehat S_0^{(-\kappa(i_{n_1}^1))}(t_{p-1}\mid X_{i_{n_1}^1})
+\end{pmatrix}
+\in\mathbb R^{n_1\times p}.
+\]
+
+Here $H_0$ contains the cross-fitted control-survival features for external-control subjects, whereas $H_1$ contains the same features evaluated at the covariate values of treated subjects.
+
+The target calibration total is then expressed as the $p$-dimensional vector
+
+\[
+T_H
+=
+H_1^\top \mathbf 1_{n_1}
+=
+\sum_{i\in\mathcal I_1}\widehat h_i
+\in \mathbb{R}^{p}.
+\]
+
+For $i\in\mathcal I_0$, let $\widehat d_i$ denote the normalized baseline ATT odds weight,
+
+\[
+\widehat d_i
+=
+\frac{n_1\widehat q_i}
+{\sum_{j\in\mathcal I_0}\widehat q_j},
+\qquad
+\widehat q_i
+=
+\frac{\widehat\pi_i}{1-\widehat\pi_i}
+=
+\frac{\widehat\pi^{(-k)}(X_i)}{1-\widehat\pi^{(-k)}(X_i)},
+\]
+
+where $k=\kappa(i)$ and $\widehat\pi_i$ is obtained in Step 2.
+
+The MEC-Cox calibrated weights are obtained by the Bregman projection
+
+\[
+\widehat w
+=
+\arg\min_{\{w_i>0:i\in\mathcal I_0\}}
+\sum_{i\in\mathcal I_0}
+D_G(w_i\|\widehat d_i)
+\]
+
+subject to
+
+\[
+H_0^\top w
+=
+H_1^\top\mathbf 1_{n_1}
+=
+T_H\in \mathbb{R}^{p},
+\]
+
+where
+
+\[
+D_G(w_i\|\widehat d_i)
+=
+G(w_i)-G(\widehat d_i)-g(\widehat d_i)(w_i-\widehat d_i),
+\qquad
+g=G',
+\]
+
+and $G$ is a strictly convex generator.
+
+Directly solving this primal problem would require optimizing over $n_0$ external-control weights. Instead, MEC-Cox solves the equivalent low-dimensional dual problem, whose dimension is only $p$, the number of calibration features.
+
 The intercept constraint preserves the total external-control weight $n_1$;
 the other constraints match the treated cohort's predicted-survival totals.
+The following code constructs these matrices and uses the KL generator
+$G(u)=u\log u$ for the worked example.
 
 ```{r primal-problem}
 H0 <- H[I0, , drop = FALSE]
@@ -328,28 +818,138 @@ data.frame(feature = colnames(H),
            row.names = NULL)
 ```
 
-We form this problem explicitly, then solve its $p$-dimensional dual instead of
-optimizing over $n_0$ weights.
-
 ## Step 4. Conversion to the dual problem
 
-Use the same Lagrangian sign as the supplement:
+We next convert the constrained primal problem into a low-dimensional dual problem. Recall that the MEC-Cox calibration problem is
 
 \[
-\mathcal L(w,\lambda)=\sum_{i\in\mathcal I_0}D_G(w_i\|\widehat d_i)
--\lambda^\top(H_0^\top w-T_H).
+\widehat w
+=
+\arg\min_{\{w_i>0:i\in\mathcal I_0\}}
+\sum_{i\in\mathcal I_0}
+D_G(w_i\|\widehat d_i)
+\quad
+\text{subject to}
+\quad
+H_0^\top w=T_H \in \mathbb{R}^{p}.
 \]
 
-Stationarity gives $g(w_i)=g(\widehat d_i)+\lambda^\top\widehat h_i$, hence
+Let $\lambda\in\mathbb R^p$ denote the Lagrange multiplier associated with the calibration constraint. Define the Lagrangian
 
 \[
-w_i(\lambda)=g^{-1}\{g(\widehat d_i)+\lambda^\top\widehat h_i\},
-\qquad F(\lambda)=H_0^\top w(\lambda)-T_H=0.
+\mathcal L(w,\lambda)
+=
+\sum_{i\in\mathcal I_0}
+D_G(w_i\|\widehat d_i)
+-
+\lambda^\top
+\left(
+H_0^\top w
+-
+T_H
+\right).
 \]
 
-This is the dual estimating equation. For the KL choice above,
-$g(u)=1+\log u$ and $g^{-1}(v)=\exp(v-1)$, so
-$w_i(\lambda)=\widehat d_i\exp(\lambda^\top\widehat h_i)$.
+Because
+
+\[
+D_G(w_i\|\widehat d_i)
+=
+G(w_i)-G(\widehat d_i)-g(\widehat d_i)(w_i-\widehat d_i),
+\qquad g=G',
+\]
+
+we have
+
+\[
+\frac{\partial}{\partial w_i}
+D_G(w_i\|\widehat d_i)
+=
+g(w_i)-g(\widehat d_i).
+\]
+
+Therefore, the stationarity condition of the Karush–Kuhn–Tucker (KKT) equations is
+
+\[
+\frac{\partial \mathcal L(w,\lambda)}{\partial w_i}
+=
+g(w_i)-g(\widehat d_i)-\lambda^\top\widehat h_i
+=
+0,
+\qquad i\in\mathcal I_0.
+\]
+
+Equivalently,
+
+\[
+g(w_i)
+=
+g(\widehat d_i)+\lambda^\top\widehat h_i.
+\]
+
+Since $G$ is strictly convex, $g=G'$ is strictly increasing and hence invertible on its domain. Thus, for any fixed admissible $\lambda$, the primal weight satisfying the stationarity condition is
+
+\[
+w_i(\lambda)
+=
+g^{-1}\{g(\widehat d_i)+\lambda^\top\widehat h_i\},
+\qquad i\in\mathcal I_0.
+\]
+
+The remaining KKT condition is primal feasibility
+
+\[
+H_0^\top w(\lambda)=T_H.
+\]
+
+Substituting the dual representation $w_i(\lambda)$ into the calibration constraint yields the dual estimating equation
+
+\[
+F(\lambda)
+=
+\sum_{i\in\mathcal I_0}
+w_i(\lambda)\widehat h_i
+-
+T_H
+=
+0.
+\]
+
+Equivalently,
+
+\[
+F(\lambda)
+=
+\sum_{i\in\mathcal I_0}
+\widehat h_i
+g^{-1}\{g(\widehat d_i)+\lambda^\top\widehat h_i\}
+-
+\sum_{i\in\mathcal I_1}\widehat h_i
+=
+0,
+\]
+
+or, in matrix form,
+
+\[
+F(\lambda)
+=
+H_0^\top w(\lambda)-T_H.
+\]
+
+Thus, instead of optimizing over the $n_0$-dimensional vector $w$, MEC-Cox solves the $p$-dimensional nonlinear equation $F(\lambda)=0$.
+
+The dual estimating equation also supplies the calibration component of the stacked system for variance estimation.
+
+For the KL choice used in the code, $g(u)=1+\log u$ and
+$g^{-1}(v)=\exp(v-1)$. Consequently,
+
+\[
+w_i(\lambda)=\widehat d_i\exp(\lambda^\top\widehat h_i).
+\]
+
+The functions below evaluate the implied weights and the dual residual.
+At $\lambda=0$, the implied weights are the baseline weights.
 
 ```{r dual-problem}
 w_of_lambda <- function(lambda) {
@@ -367,26 +967,111 @@ stopifnot(max(abs(w_of_lambda(lambda0) - d_hat)) < 1e-12)
 
 ## Step 5. Dual Newton solver
 
-Define $\nu_i(\lambda)=g(\widehat d_i)+\lambda^\top\widehat h_i$.
-The dual domain contains values of $\lambda$ for which every
-$\nu_i(\lambda)$ belongs to $\operatorname{dom}(g^{-1})$.
-The Jacobian and Newton update are
+The Newton update is based on the Jacobian of $F(\lambda)$. We view the dual calibration map as
 
 \[
-J(\lambda)=H_0^\top\operatorname{diag}
-\left[\frac{1}{g'\{w_i(\lambda)\}}:i\in\mathcal I_0\right]H_0,
-\]
-\[
-\{J(\lambda_m)+\rho I_p\}\Delta_m=F(\lambda_m),
-\qquad \lambda_{m+1}=\lambda_m-\alpha_m\Delta_m.
+F:\mathcal D_{\lambda}\subseteq \mathbb R^{p}\longrightarrow \mathbb R^{p},
 \]
 
-For KL, $1/g'(w_i)=w_i$. The code uses the supplement's choices
-$\rho=10^{-8}$, $\varepsilon=10^{-10}$, and at most 100 Newton updates.
-Each update starts with $\alpha_m=1$. KL has
-$\operatorname{dom}(g^{-1})=\mathbb R$; the step-halving guard below also
-rejects weights that overflow or underflow in finite-precision arithmetic.
-Convergence requires $\|F(\widehat\lambda)\|_2\le\varepsilon$.
+where
+
+\[
+\mathcal D_{\lambda}
+=
+\left\{
+\lambda\in\mathbb R^{p}:
+g(\widehat d_i)+\lambda^\top \widehat h_i
+\in \operatorname{dom}(g^{-1})
+\ \text{for all } i\in\mathcal I_0
+\right\}.
+\]
+
+That is, the domain of $F$ consists of all dual parameters $\lambda$ for which the implied weights $w_i(\lambda)
+=
+g^{-1}\{g(\widehat d_i)+\lambda^\top \widehat h_i\},$ $(i\in\mathcal I_0)$ are well-defined.
+
+By the stationarity equation in Step 4, let
+
+\[
+\nu_i(\lambda)
+=
+g(\widehat d_i)+\lambda^\top\widehat h_i,
+\qquad
+w_i(\lambda)=g^{-1}\{\nu_i(\lambda)\}.
+\]
+
+Assuming $g'(w)>0$ at the weights considered, the inverse-function derivative is
+
+\[
+\frac{\partial w_i(\lambda)}{\partial \nu_i}
+=
+\frac{1}{g'\{w_i(\lambda)\}},
+\]
+
+and hence the Jacobian of $F(\lambda)$ is
+
+\[
+J(\lambda)
+=
+\frac{\partial F(\lambda)}{\partial \lambda^\top}
+=
+\sum_{i\in\mathcal I_0}
+\frac{1}{g'\{w_i(\lambda)\}}
+\widehat h_i\widehat h_i^\top \in \mathbb{R}^{p \times p}.
+\]
+
+In matrix form,
+
+\[
+J(\lambda)
+=
+H_0^\top
+\operatorname{diag}
+\left[
+\frac{1}{g'\{w_i(\lambda)\}}:i\in\mathcal I_0
+\right]
+H_0 \in \mathbb{R}^{p \times p}.
+\]
+
+At iteration $m$, the Newton direction $\Delta_m$ solves
+
+\[
+\{J(\lambda_m)+\rho I_{p}\}\Delta_m
+=
+F(\lambda_m),
+\]
+
+where $\rho>0$ is a small ridge constant used for numerical stability. The dual parameter is updated by
+
+\[
+\lambda_{m+1}
+=
+\lambda_m-\alpha_m\Delta_m=
+\lambda_m-\alpha_m \{J(\lambda_m)+\rho I_{p}\}^{-1}F(\lambda_m),
+\]
+
+where $\alpha_m\in(0,1]$ is chosen by step-halving if necessary to keep all dual arguments $\nu_i(\lambda_{m+1})
+=
+g(\widehat d_i)+\lambda_{m+1}^\top\widehat h_i$ inside the domain of $g^{-1}$. The iteration stops when the calibration residual is sufficiently small, for example when
+
+\[
+\|F(\lambda_m)\|_2
+=
+\left\|
+H_0^\top w(\lambda_m)-T_H
+\right\|_2
+\le \varepsilon
+\]
+
+for a prespecified tolerance $\varepsilon$.
+
+The ridge constant $\rho$, the step-halving rule, and the stopping tolerance $\varepsilon$ are user-specified numerical choices. For the illustrative solver below, we use $\rho=10^{-8}$, initialize $\alpha_m=1$, and apply step-halving only when necessary to keep the dual argument within the domain of $g^{-1}$. The stopping tolerance is $\varepsilon=10^{-10}$, with at most 100 Newton iterations.
+
+For the KL generator, $1/g'(w_i)=w_i$ and
+$\operatorname{dom}(g^{-1})=\mathbb R$. The step-halving guard in the
+code also rejects weights that overflow or underflow in finite-precision
+arithmetic. It starts each update with $\alpha_m=1$, then halves the step
+until the implied weights are finite and positive.
 
 ```{r newton-solver}
 J <- function(lambda) {
@@ -447,37 +1132,95 @@ col.names = c("Feature", "Treated mean", "Baseline control mean",
               "Calibrated control mean"))
 ```
 
+The dual formulation solves for $p$ calibration parameters instead of $n_0$
+external-control weights. Its parameter dimension is $p$, although forming
+the Jacobian still requires contributions from all $n_0$ external-control
+subjects. At each iteration, assembling the $p\times p$ Jacobian
+$J(\lambda)$ requires $O(n_0p^2)$ operations, and solving for the Newton
+step requires $O(p^3)$ operations.
+
 ## Step 6. Final MEC-Cox estimator
 
-Recover $\widehat w_i=g^{-1}\{g(\widehat d_i)+\widehat\lambda^\top\widehat h_i\}$
-for external controls. The final estimating-equation weights are
+After convergence of the dual Newton solver, let $\widehat\lambda$ denote the resulting dual
+solution and define the calibrated external-control weights by
 
 \[
-\widetilde\omega_i=A_i+(1-A_i)\widehat w_i.
+\widehat w_i
+=
+g^{-1}\{g(\widehat d_i)+\widehat\lambda^\top \widehat h_i\},
+\qquad i\in \mathcal I_0 .
 \]
 
-Treated subjects retain weight one. Using these weights, define
+The final MEC-Cox estimating-equation weight is
 
 \[
-S_{\mathrm{MEC},\omega}^{(r)}(t;\theta)
-=\sum_{i=1}^n\widetilde\omega_i\mathcal Y_i(t)
-\exp(\theta A_i)A_i^r,\qquad r=0,1,
-\]
-\[
-\overline A_{\mathrm{MEC},\omega}(t;\theta)
-=\frac{S_{\mathrm{MEC},\omega}^{(1)}(t;\theta)}
-{S_{\mathrm{MEC},\omega}^{(0)}(t;\theta)}.
+\widetilde\omega_i
+=
+A_i + (1-A_i)\widehat w_i,
+\qquad i=1,\ldots,n.
 \]
 
-Here $\mathcal Y_i(t)$ is the at-risk indicator and $\mathcal N_i(t)$ is the
-event counting process. Solve
+Thus, treated patients retain weight one, whereas external-control patients receive the MEC-updated ATT weights.
+
+Here $\mathcal Y_i(t)$ is the at-risk indicator and $\mathcal N_i(t)$
+is the event counting process. Using the final weights, define
 
 \[
-U_n^{\mathrm{MEC}}(\theta)=\sum_{i=1}^n\int\widetilde\omega_i
-\{A_i-\overline A_{\mathrm{MEC},\omega}(t;\theta)\}\,d\mathcal N_i(t)=0
+S_{\mathrm{MEC}, \omega}^{(r)}(t;\theta)
+=
+\sum_{i=1}^n
+\widetilde\omega_i
+\mathcal{Y}_i(t)\exp(\theta A_i)A_i^r,
+\qquad r=0,1,
 \]
 
-and report $\widehat{\mathrm{HR}}_{\mathrm{MEC}}=\exp(\widehat\theta_{\mathrm{MEC}})$.
+and
+
+\[
+\overline A_{\mathrm{MEC}, \omega}(t;\theta)
+=
+\frac{S_{\mathrm{MEC}, \omega}^{(1)}(t;\theta)}
+     {S_{\mathrm{MEC}, \omega}^{(0)}(t;\theta)} .
+\]
+
+The MEC-Cox estimator is the solution to the weighted Cox estimating equation
+
+\[
+U_n^{\mathrm{MEC}}(\theta)
+=
+\sum_{i=1}^n
+\int
+\widetilde\omega_i
+\{A_i-\overline A_{\mathrm{MEC}, \omega}(t;\theta)\}
+\,d\mathcal{N}_i(t)
+=
+0.
+\]
+
+Equivalently, $\widehat\theta_{\mathrm{MEC}}$ maximizes the weighted Cox partial log-likelihood
+
+\[
+\ell_{\mathrm{MEC}}(\theta)
+=
+\sum_{i=1}^n
+\widetilde\omega_i
+\int
+\left[
+\theta A_i
+-
+\log\{S_{\mathrm{MEC}, \omega}^{(0)}(t;\theta)\}
+\right]
+\,d\mathcal{N}_i(t).
+\]
+
+The final MEC-Cox hazard-ratio estimator is therefore
+
+\[
+\widehat{\mathrm{HR}}_{\mathrm{MEC}}
+=
+\exp(\widehat\theta_{\mathrm{MEC}}).
+\]
+
 In R, the point estimate is obtained by fitting a weighted Cox model with
 `A` as its sole covariate. Breslow handling of tied events matches the package.
 
@@ -568,19 +1311,27 @@ line 4 combines Steps 3–5; and lines 5–6 give the final calculation in Step 
 
 ## Agreement with `fit_mec_cox()`
 
-The package call performs these calculations together. We supply the same
-learners, folds, landmark times, and propensity bounds used above.
+The package call performs calibration and estimation using the same inputs.
+We pass the cross-fitted propensity scores from Step 2 through `ps_predictions`,
+so the selected classifier is not fitted again. The package reconstructs the
+same folds from `seed` and fits the selected Cox or RSF survival learner with
+the same landmark times and settings.
 
 ```{r package-comparison}
 mec <- fit_mec_cox(
   example_external_controls,
   time = "time", event = "event", source = "source",
-  covariates = X_names, ps_learner = "glm", survival_learner = "cox",
-  n_folds = K, landmarks = t_landmark, seed = seed, ps_trim = ps_trim
+  covariates = X_names, ps_predictions = pi_hat,
+  survival_learner = survival_method,
+  n_folds = K, landmarks = t_landmark, seed = seed, ps_trim = ps_trim,
+  nuisance_settings = "standard", rsf_auto_tune = FALSE,
+  rsf_num_trees = rsf_settings$num_trees,
+  rsf_min_node_size = rsf_settings$min_node_size
 )
 
 # First verify the ingredients, before comparing the calibrated estimates.
 stopifnot(
+  isTRUE(mec$ps_predictions_supplied),
   identical(kappa, mec$fold_id),
   max(abs(pi_hat - mec$ps_oof)) < 1e-12,
   max(abs(H - mec$basis)) < 1e-12,
@@ -624,6 +1375,9 @@ data.frame(hazard_ratio = mec$hr, SE_log_hazard_ratio = mec$se,
 Download the R Markdown source and run its chunks in order in RStudio, or use
 **Knit** to recreate this HTML page. After installing `mecCox`, the rendering
 tools can be installed with `install.packages(c("rmarkdown", "knitr"))`.
+The cross-fitting diagram is written directly in a TikZ chunk in this source.
+Rebuilding that diagram requires LaTeX with TikZ and the `standalone`, `times`,
+and `mathastext` packages, plus `dvisvgm`; viewing the HTML requires only a browser.
 From the repository root, render with:
 
 ```{r render-manual, eval=FALSE}
