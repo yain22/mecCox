@@ -402,7 +402,6 @@ for (k in seq_len(K)) {
 colnames(S0_hat) <- paste0("S0(t=", t_landmark, ")")
 H <- cbind(intercept = 1, S0_hat)
 stopifnot(all(is.finite(H)), all(S0_hat >= 0 & S0_hat <= 1))
-head(H, 3)
 ```
 
 In both cases, the predictor basis summarizes the estimated counterfactual
