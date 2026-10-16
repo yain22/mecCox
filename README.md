@@ -18,7 +18,7 @@ install.packages("remotes")
 remotes::install_github("yain22/mecCox", dependencies = TRUE)
 ```
 
-## First analysis
+## Toy analysis
 
 ```r
 library(mecCox)
