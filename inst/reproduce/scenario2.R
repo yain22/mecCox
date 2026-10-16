@@ -12,8 +12,11 @@
 # Publication replication (full study; takes a long time)
 quick_run <- FALSE; cores <- 20L; replications <- 1000L
 
-# Quick learning (explore the code with fewer design cells)
+# Quick learning (same learner hyperparameters)
+# Option 1: fewer design combinations, 200 replications each
 # quick_run <- TRUE; cores <- 20L; replications <- 200L
+# Option 2: all design combinations, 200 replications each
+# quick_run <- FALSE; cores <- 20L; replications <- 200L
 
 # source() records the current file in an `ofile` frame. Selected lines in an
 # editor have no such frame, so also look in the working directory and package.
