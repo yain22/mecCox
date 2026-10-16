@@ -1316,12 +1316,21 @@ so the selected classifier is not fitted again. The package reconstructs the
 same folds from `seed` and fits the selected Cox or RSF survival learner with
 the same landmark times and settings.
 
+Choose `kl_derivative = "numerical"` (default) or `"analytic"` for the KL
+cross-derivative used in the sandwich variance. The detailed
+[KL cross-derivative illustration](#kl-cross-derivative-numerical-and-analytic-calculation)
+below derives both choices and compares them using this fitted example.
+
 ```{r package-comparison}
+# Choose one KL cross-derivative calculation; numerical is the default.
+kl_derivative <- "numerical"  # Change to "analytic" for the analytic calculation.
+
 mec <- fit_mec_cox(
   example_external_controls,
   time = "time", event = "event", source = "source",
   covariates = X_names, ps_predictions = pi_hat,
   survival_learner = survival_method,
+  kl_derivative = kl_derivative,
   n_folds = K, landmarks = t_landmark, seed = seed, ps_trim = ps_trim,
   nuisance_settings = "standard", rsf_auto_tune = FALSE,
   rsf_num_trees = rsf_settings$num_trees,
@@ -1368,6 +1377,301 @@ data.frame(hazard_ratio = mec$hr, SE_log_hazard_ratio = mec$se,
            CI_lower = unname(mec$conf_int["lower"]),
            CI_upper = unname(mec$conf_int["upper"]))
 ```
+
+## KL cross-derivative: numerical and analytic calculation
+
+The `kl_derivative` option in `fit_mec_cox()` selects how one block of the
+stacked-sandwich Jacobian is evaluated. Its default is `"numerical"`;
+`"analytic"` uses the KL identity derived below. Both choices use the same
+estimated propensity scores, prognostic basis, calibrated weights, and Cox
+coefficient. The choice concerns the variance calculation after fitting.
+To select a method, change `kl_derivative` in the package call above and
+rerun from that chunk. The comparison below always evaluates both choices
+and identifies the selected one.
+
+Write $U(\theta,\lambda)=U_{\mathrm{MEC},\theta}(\theta,\lambda)$ for the
+weighted Cox score from Step 6. The cross-derivative is the row vector
+
+\[
+D_{\theta\lambda}(\theta,\lambda)
+=\frac{\partial U(\theta,\lambda)}{\partial\lambda^\top}
+\in\mathbb R^{1\times p}.
+\]
+
+Here the nuisance predictions, $\widehat d_i$, $\widehat h_i$, and $\theta$
+are held fixed while $\lambda$ varies. This differs from the calibration
+Jacobian $J(\lambda)=\partial F(\lambda)/\partial\lambda^\top$ used in
+Step 5: $J$ differentiates the balance equations and is a $p\times p$ matrix;
+$D_{\theta\lambda}$ differentiates the Cox score and has one row.
+
+The calculation below reuses the fitted `mec` object. It does not refit
+nuisance learners, calibration, or the Cox coefficient.
+
+```{r kl-fixed-inputs}
+kl_derivative <- match.arg(kl_derivative, c("numerical", "analytic"))
+fixed_data <- mec$analysis_data
+fixed_theta <- mec$theta
+fixed_lambda <- mec$calibration$lambda
+fixed_omega <- mec$weights
+fixed_H <- mec$basis
+fixed_I0 <- which(fixed_data$A == 0L)
+fixed_I1 <- which(fixed_data$A == 1L)
+fixed_H0 <- fixed_H[fixed_I0, , drop = FALSE]
+fixed_d <- mec$baseline_weights[fixed_I0]
+fixed_p <- ncol(fixed_H)
+
+omega_at_lambda <- function(candidate) {
+  omega <- rep(1, nrow(fixed_data))
+  omega[fixed_I0] <- fixed_d * exp(drop(fixed_H0 %*% candidate))
+  omega
+}
+stopifnot(max(abs(omega_at_lambda(fixed_lambda) - fixed_omega)) < 1e-10)
+```
+
+For a fixed pair $(\theta,\lambda)$, abbreviate
+$\widetilde\omega_i=\widetilde\omega_i(\lambda)$ and
+$\overline A(t)=\overline A_{\mathrm{MEC},\omega}(t;\theta,\lambda)$.
+To make the risk-set calculation explicit, let $\mathcal E(t)$ be the
+subjects with an observed event at $t$, and $\mathcal R(t)$ those still at
+risk, including subjects whose observed follow-up ends at $t$. Define
+
+\[
+m_\omega(t)=\sum_{i\in\mathcal E(t)}\widetilde\omega_i,
+\qquad
+S^{(r)}_\lambda(t;\theta)=
+\sum_{i\in\mathcal R(t)}\widetilde\omega_i
+e^{\theta A_i}A_i^r,
+\qquad
+\overline A(t)=\frac{S^{(1)}_\lambda(t;\theta)}
+                    {S^{(0)}_\lambda(t;\theta)}.
+\]
+
+The following function evaluates the score using Breslow handling of tied
+events. It also evaluates the complete Lin–Wei/Binder empirical contribution
+$\eta_i$ from Supplement S2.5. This contribution includes both a subject's
+event and its effect on every weighted risk set in which it appears:
+
+\[
+\begin{aligned}
+\eta_i(\theta,\lambda)
+={}&\int \widetilde\omega_i(\lambda)
+       \{A_i-\overline A(t)\}\,d\mathcal N_i(t)\\
+ &-\int\frac{\widetilde\omega_i(\lambda)\mathcal Y_i(t)e^{\theta A_i}
+                 \{A_i-\overline A(t)\}}
+                {S^{(0)}_\lambda(t;\theta)}
+       \,d\mathcal N_{\omega,\lambda}(t),
+\end{aligned}
+\]
+
+where $d\mathcal N_{\omega,\lambda}(t)=
+\sum_j\widetilde\omega_j(\lambda)\,d\mathcal N_j(t)$.
+
+```{r kl-cox-risk-sets}
+weighted_cox_components <- function(theta, analysis_data, omega) {
+  A <- analysis_data$A
+  time <- analysis_data$time
+  event <- analysis_data$delta
+  event_times <- sort(unique(time[event == 1L]))
+  score <- 0
+  eta <- numeric(length(A))
+  for (t in event_times) {
+    events <- which(time == t & event == 1L)
+    risk <- which(time >= t)
+    risk_weight <- omega[risk] * exp(theta * A[risk])
+    S0 <- sum(risk_weight)
+    Abar <- sum(risk_weight * A[risk]) / S0
+    event_mass <- sum(omega[events])
+    event_part <- omega[events] * (A[events] - Abar)
+    score <- score + sum(event_part)
+    eta[events] <- eta[events] + event_part
+    eta[risk] <- eta[risk] - risk_weight * event_mass / S0 *
+      (A[risk] - Abar)
+  }
+  list(score = score, eta = eta)
+}
+
+fixed_cox <- weighted_cox_components(fixed_theta, fixed_data, fixed_omega)
+stopifnot(abs(sum(fixed_cox$eta) - fixed_cox$score) < 1e-10)
+```
+
+**Numerical calculation.** For component $j$, use the central difference
+
+\[
+\widehat D_{\theta\lambda,j}^{\mathrm{num}}
+=\frac{U(\widehat\theta_{\mathrm{MEC}},
+         \widehat\lambda+\epsilon_j e_j)
+       -U(\widehat\theta_{\mathrm{MEC}},
+         \widehat\lambda-\epsilon_j e_j)}{2\epsilon_j},
+\qquad
+\epsilon_j=10^{-5}\max(1,|\widehat\lambda_j|),
+\]
+
+where $e_j$ is the $j$th coordinate vector. Each perturbation changes the
+external-control weights and therefore both the event terms and risk-set
+averages. Perturbed weights are not renormalized or recalibrated, and $\theta$
+is not re-estimated: those operations would differentiate a different map.
+
+```{r kl-numerical-cross-derivative}
+central_difference <- function(fun, x) {
+  derivative <- numeric(length(x))
+  for (j in seq_along(x)) {
+    increment <- 1e-5 * max(1, abs(x[j]))
+    plus <- minus <- x
+    plus[j] <- plus[j] + increment
+    minus[j] <- minus[j] - increment
+    derivative[j] <- (fun(plus) - fun(minus)) / (2 * increment)
+  }
+  derivative
+}
+score_at_lambda <- function(candidate) {
+  weighted_cox_components(fixed_theta, fixed_data,
+                          omega_at_lambda(candidate))$score
+}
+derivative_numerical <- central_difference(score_at_lambda, fixed_lambda)
+```
+
+**Analytic calculation for KL.** Since
+$w_i(\lambda)=\widehat d_i\exp(\lambda^\top\widehat h_i)$,
+
+\[
+\frac{\partial w_i(\lambda)}{\partial\lambda_j}
+=w_i(\lambda)\widehat h_{ij},\qquad i\in\mathcal I_0,
+\]
+
+and treated subjects have derivative zero. Differentiating the score's event
+weights and risk-set averages gives
+
+\[
+\frac{\partial U}{\partial\lambda_j}
+=\sum_{i\in\mathcal I_0}\widehat h_{ij}
+\left[
+\int w_i\{A_i-\overline A(t)\}\,d\mathcal N_i(t)
+-\int\frac{w_i\mathcal Y_i(t)e^{\theta A_i}
+                \{A_i-\overline A(t)\}}
+               {S^{(0)}_\lambda(t;\theta)}
+       \,d\mathcal N_{\omega,\lambda}(t)
+\right].
+\]
+
+The bracket is exactly $\eta_i(\theta,\lambda)$. At the fitted pair,
+$\widehat\eta_i=\eta_i(\widehat\theta_{\mathrm{MEC}},\widehat\lambda)$,
+so
+
+\[
+\widehat D_{\theta\lambda}^{\mathrm{ana}}
+=\sum_{i\in\mathcal I_0}\widehat\eta_i
+                           \widehat h_i^\top.
+\]
+
+Using only the direct event contribution would omit the derivative of the
+risk-set average. The full `eta` vector above supplies both terms.
+
+```{r kl-analytic-cross-derivative}
+derivative_analytic <- drop(crossprod(fixed_cox$eta[fixed_I0], fixed_H0))
+feature_names <- c("Intercept", paste0("S0(t=", mec$landmark_times, ")"))[
+  mec$retained_basis
+]
+derivative_comparison <- data.frame(
+  Feature = feature_names,
+  Numerical = derivative_numerical,
+  Analytic = derivative_analytic,
+  Absolute_difference = abs(derivative_numerical - derivative_analytic)
+)
+knitr::kable(derivative_comparison, digits = c(0, 8, 8, 12), row.names = FALSE,
+  col.names = c("Feature", "Numerical", "Analytic", "Absolute difference"))
+```
+
+**Effect on the stacked-sandwich calculation.** Define the calibration
+contribution for each subject as
+
+\[
+\widehat\rho_i=\begin{cases}
+\widehat w_i\widehat h_i,&i\in\mathcal I_0,\\
+-\widehat h_i,&i\in\mathcal I_1,
+\end{cases}
+\qquad
+\widehat\Psi_i=\begin{pmatrix}\widehat\eta_i\\\widehat\rho_i\end{pmatrix}.
+\]
+
+Let $\widehat a$ be $\partial U/\partial\theta$ evaluated at
+$(\widehat\theta_{\mathrm{MEC}},\widehat\lambda)$. Using the calibration
+Jacobian from Step 5, the full Jacobian is
+
+\[
+\widehat D_{\mathrm{stack}}
+=\begin{pmatrix}\widehat a&\widehat D_{\theta\lambda}\\0&J(\widehat\lambda)\end{pmatrix}.
+\]
+
+When this matrix is nonsingular, the sandwich covariance is
+
+\[
+\widehat V
+=\widehat D_{\mathrm{stack}}^{-1}
+ \left(\sum_{i=1}^n\widehat\Psi_i\widehat\Psi_i^\top\right)
+ \widehat D_{\mathrm{stack}}^{-\top}.
+\]
+
+These use summed equations and summed subject contributions, so there is no
+additional $1/n$ factor. The estimated standard error of the log hazard ratio
+is $\sqrt{\widehat V_{11}}$. Both choices below retain the package's numerical
+calculation of $\widehat a$ and its singular-value cutoff; only
+$\widehat D_{\theta\lambda}$ changes.
+If the cutoff removes a direction, the code uses the same generalized inverse
+as the package in place of the ordinary inverse.
+
+```{r kl-sandwich-comparison}
+a_theta <- central_difference(function(candidate) {
+  weighted_cox_components(candidate[1L], fixed_data, fixed_omega)$score
+}, fixed_theta)
+J_fixed <- crossprod(fixed_H0 * fixed_omega[fixed_I0], fixed_H0)
+calibration_rows <- matrix(0, nrow(fixed_data), fixed_p)
+calibration_rows[fixed_I0, ] <- fixed_H0 * fixed_omega[fixed_I0]
+calibration_rows[fixed_I1, ] <- -fixed_H[fixed_I1, , drop = FALSE]
+psi_rows <- cbind(fixed_cox$eta, calibration_rows)
+
+sandwich_with_cross_derivative <- function(derivative_lambda) {
+  D_stack <- rbind(c(a_theta, derivative_lambda), cbind(rep(0, fixed_p), J_fixed))
+  decomposition <- svd(D_stack)
+  retain <- decomposition$d > max(decomposition$d) * 1e-8
+  stopifnot(any(retain))
+  D_inverse <- decomposition$v[, retain, drop = FALSE] %*%
+    (t(decomposition$u[, retain, drop = FALSE]) / decomposition$d[retain])
+  influence_theta <- -drop(psi_rows %*% D_inverse[1L, ])
+  se <- sqrt(sum(influence_theta^2))
+  critical_value <- qnorm((1 + mec$conf_level) / 2)
+  interval <- exp(fixed_theta + c(-1, 1) * critical_value * se)
+  list(se = se, interval = interval, rank = sum(retain),
+       used_pseudoinverse = !all(retain), influence = influence_theta)
+}
+kl_results <- list(
+  numerical = sandwich_with_cross_derivative(derivative_numerical),
+  analytic = sandwich_with_cross_derivative(derivative_analytic)
+)
+uncertainty_comparison <- do.call(rbind, lapply(names(kl_results), function(choice) {
+  result <- kl_results[[choice]]
+  data.frame(Derivative = choice, Selected = choice == kl_derivative,
+             HR = exp(fixed_theta),
+             SE_log_HR = result$se,
+             CI_lower = result$interval[1L], CI_upper = result$interval[2L])
+}))
+knitr::kable(uncertainty_comparison, digits = 9,
+  col.names = c("Derivative", "Selected", "HR", "SE (log HR)",
+                "CI lower", "CI upper"))
+
+# This is the same selection passed to fit_mec_cox() above.
+selected_kl_result <- kl_results[[kl_derivative]]
+stopifnot(
+  max(abs(derivative_numerical - derivative_analytic)) < 1e-5 * max(1, max(abs(derivative_analytic))),
+  abs(selected_kl_result$se - mec$se) < 1e-7
+)
+```
+
+The `Selected` column identifies the option passed to the package call above.
+The common HR in the table is expected: the two calculations reuse exactly
+the same fitted coefficient. Any difference in SE or confidence limits here
+comes from numerical approximation of the cross-derivative. The analytic
+identity uses the KL exponential weight map; it does not by itself provide
+the corresponding formula for a different Bregman generator.
 
 ## Run or rebuild this manual
 
