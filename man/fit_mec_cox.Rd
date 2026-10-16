@@ -33,6 +33,7 @@ fit_mec_cox(
   nuisance_settings = c("standard", "original_study"),
   bart_auto_tune = NULL,
   ml_tune_n = 100L,
+  kl_derivative = c("numerical", "analytic"),
   ...
 )
 }
@@ -110,6 +111,9 @@ disables it for \code{"standard"}. Set \code{FALSE} to use the supplied BART con
 \item{ml_tune_n}{Maximum subset size for BART tuning and for RSF tuning under
 \code{"original_study"}. Standard RSF tuning continues to use all training-fold
 controls. Tuning subsets never include the held-out cross-fitting fold.}
+
+\item{kl_derivative}{Method for the KL cross-derivative in the sandwich
+variance: \code{"numerical"} (default) or \code{"analytic"}.}
 
 \item{...}{Reserved; unsupported arguments cause an error.}
 }

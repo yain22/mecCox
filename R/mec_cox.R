@@ -780,7 +780,9 @@
 .mec_stacked_variance <- function(theta, data, weights, base_weights,
                                   control_basis, target_basis,
                                   control_rows, target_rows, lambda,
-                                  calibration_hessian) {
+                                  calibration_hessian,
+                                  kl_derivative = c("numerical", "analytic")) {
+  kl_derivative <- match.arg(kl_derivative)
   n <- nrow(data)
   score_result <- .mec_cox_score(theta, data, weights)
   derivative_theta <- .mec_central_difference(
@@ -790,16 +792,22 @@
     x = theta
   )
 
-  score_at_lambda <- function(candidate) {
-    control_weights <- base_weights * exp(
-      as.numeric(control_basis %*% candidate)
-    )
-    candidate_weights <- numeric(n)
-    candidate_weights[target_rows] <- 1
-    candidate_weights[control_rows] <- control_weights
-    .mec_cox_score(theta, data, candidate_weights, individual = FALSE)$score
+  if (kl_derivative == "analytic") {
+    derivative_lambda <- as.numeric(crossprod(
+      score_result$contribution[control_rows], control_basis
+    ))
+  } else {
+    score_at_lambda <- function(candidate) {
+      control_weights <- base_weights * exp(
+        as.numeric(control_basis %*% candidate)
+      )
+      candidate_weights <- numeric(n)
+      candidate_weights[target_rows] <- 1
+      candidate_weights[control_rows] <- control_weights
+      .mec_cox_score(theta, data, candidate_weights, individual = FALSE)$score
+    }
+    derivative_lambda <- .mec_central_difference(score_at_lambda, lambda)
   }
-  derivative_lambda <- .mec_central_difference(score_at_lambda, lambda)
 
   n_basis <- ncol(control_basis)
   calibration_contribution <- matrix(0, nrow = n, ncol = n_basis)
@@ -920,6 +928,8 @@
 #' @param ml_tune_n Maximum subset size for BART tuning and for RSF tuning under
 #'   `"original_study"`. Standard RSF tuning continues to use all training-fold
 #'   controls. Tuning subsets never include the held-out cross-fitting fold.
+#' @param kl_derivative Method for the KL cross-derivative in the sandwich
+#'   variance: `"numerical"` (default) or `"analytic"`.
 #' @param ... Reserved; unsupported arguments cause an error.
 #'
 #' @return An object of class `mec_cox_fit` containing the log-hazard-ratio
@@ -961,7 +971,8 @@ fit_mec_cox <- function(data, time, event, source, covariates,
                         rsf_min_node_size = 15L,
                         rsf_auto_tune = TRUE, ps_predictions = NULL,
                         nuisance_settings = c("standard", "original_study"),
-                        bart_auto_tune = NULL, ml_tune_n = 100L, ...) {
+                        bart_auto_tune = NULL, ml_tune_n = 100L,
+                        kl_derivative = c("numerical", "analytic"), ...) {
   call <- match.call()
   if (length(list(...))) {
     stop("Unsupported argument in `...`.", call. = FALSE)
@@ -969,6 +980,7 @@ fit_mec_cox <- function(data, time, event, source, covariates,
   ps_learner <- match.arg(ps_learner)
   survival_learner <- match.arg(survival_learner)
   nuisance_settings <- match.arg(nuisance_settings)
+  kl_derivative <- match.arg(kl_derivative)
   if (is.null(bart_auto_tune)) {
     bart_auto_tune <- identical(nuisance_settings, "original_study")
   }
@@ -1139,7 +1151,8 @@ fit_mec_cox <- function(data, time, event, source, covariates,
   variance <- .mec_stacked_variance(
     theta, analysis_data, weights, baseline_control,
     control_basis, target_basis, control_rows, target_rows,
-    calibration$lambda, calibration$hessian
+    calibration$lambda, calibration$hessian,
+    kl_derivative = kl_derivative
   )
   standard_error <- variance$standard_error
   critical_value <- stats::qnorm((1 + conf_level) / 2)
@@ -1155,6 +1168,7 @@ fit_mec_cox <- function(data, time, event, source, covariates,
     conf_int = stats::setNames(exp(log_interval), c("lower", "upper")),
     conf_level = conf_level,
     variance_method = "stacked_working",
+    kl_derivative = kl_derivative,
     weights = weights,
     baseline_weights = baseline_weights,
     base_weights = baseline_weights,
