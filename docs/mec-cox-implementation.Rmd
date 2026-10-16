@@ -22,6 +22,15 @@ options(width = 88, digits = 6)
 <style>
 body { line-height: 1.65; }
 .main-container { max-width: 980px; }
+#TOC { display: grid; grid-template-columns: minmax(0, 1fr) 180px;
+       column-gap: 24px; align-items: start; }
+.manual-toc-logo { width: 180px; max-width: 100%; height: auto;
+                   margin-top: 24px; }
+@media (max-width: 700px) {
+  #TOC { grid-template-columns: minmax(0, 1fr); }
+  .manual-toc-logo { width: 140px; margin: 12px auto 20px; }
+  table { display: block; max-width: 100%; overflow-x: auto; }
+}
 h2 { margin-top: 2em; }
 pre { font-size: 13px; }
 math[display="block"] { overflow-x: auto; padding: 0.5em 0; }
@@ -32,6 +41,16 @@ table { margin: 1em 0; }
                                 padding-bottom: 0.5em; }
 .algorithm-box li { margin: 0.8em 0; padding-left: 0.25em; }
 </style>
+
+<img class="manual-toc-logo" src="../man/figures/logo.svg" alt="mecCox package logo" />
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const toc = document.getElementById("TOC");
+  const logo = document.querySelector(".manual-toc-logo");
+  if (toc && logo) toc.appendChild(logo);
+});
+</script>
 
 This manual follows **Steps 1–6 of Supplement S2.4, “Computation of the
 MEC-Cox Estimator via the Dual Newton Solver,”** in the same order and with
@@ -167,7 +186,7 @@ example; the same times and folds will be used in the package comparison.
 
 ## 2. MEC-Cox implementation steps {#mec-cox-implementation-steps}
 
-### Step 1. Construction of the cross-fitted predictor basis
+### 2-1. Construction of the cross-fitted predictor basis {#step-1.-construction-of-the-cross-fitted-predictor-basis}
 
 Partition the pooled sample into $K$ folds, stratified by $A_i$, and let
 $\kappa(i)\in\{1,\ldots,K\}$ identify the fold containing subject $i$.
@@ -412,7 +431,7 @@ feature. The final Cox model in Step 6 uses $A_i$ as its sole regression
 covariate.
 
 
-### Step 2. Baseline ATT odds weights
+### 2-2. Baseline ATT odds weights {#step-2.-baseline-att-odds-weights}
 
 We next construct the baseline weights around which the MEC calibration is
 performed. Using the same folds as in Step 1, estimate the source propensity
@@ -683,7 +702,7 @@ c(baseline_weight_total = sum(d_hat), treated_count = n1)
 `d_hat` contains external-control weights only, in the order of
 `I0`; changing the propensity learner leaves this construction unchanged.
 
-### Step 3. Formulation of the primal problem
+### 2-3. Formulation of the primal problem {#step-3.-formulation-of-the-primal-problem}
 
 Write the index sets as
 
@@ -819,7 +838,7 @@ data.frame(feature = colnames(H),
            row.names = NULL)
 ```
 
-### Step 4. Conversion to the dual problem
+### 2-4. Conversion to the dual problem {#step-4.-conversion-to-the-dual-problem}
 
 We next convert the constrained primal problem into a low-dimensional dual problem. Recall that the MEC-Cox calibration problem is
 
@@ -966,7 +985,7 @@ lambda0 <- numeric(p)
 stopifnot(max(abs(w_of_lambda(lambda0) - d_hat)) < 1e-12)
 ```
 
-### Step 5. Dual Newton solver
+### 2-5. Dual Newton solver {#step-5.-dual-newton-solver}
 
 The Newton update is based on the Jacobian of $F(\lambda)$. We view the dual calibration map as
 
@@ -1140,7 +1159,7 @@ subjects. At each iteration, assembling the $p\times p$ Jacobian
 $J(\lambda)$ requires $O(n_0p^2)$ operations, and solving for the Newton
 step requires $O(p^3)$ operations.
 
-### Step 6. Final MEC-Cox estimator
+### 2-6. Final MEC-Cox estimator {#step-6.-final-mec-cox-estimator}
 
 After convergence of the dual Newton solver, let $\widehat\lambda$ denote the resulting dual
 solution and define the calibrated external-control weights by
@@ -1312,7 +1331,7 @@ line 4 combines Steps 3–5; and lines 5–6 give the final calculation in Step 
 
 ## 4. More technical details {#more-technical-details}
 
-### Agreement with `fit_mec_cox()`
+### 4-1. Agreement with `fit_mec_cox()` {#agreement-with-fit_mec_cox}
 
 The package call performs calibration and estimation using the same inputs.
 We pass the cross-fitted propensity scores from Step 2 through `ps_predictions`,
@@ -1382,7 +1401,7 @@ data.frame(hazard_ratio = mec$hr, SE_log_hazard_ratio = mec$se,
            CI_upper = unname(mec$conf_int["upper"]))
 ```
 
-### KL cross-derivative: numerical and analytic calculation
+### 4-2. KL cross-derivative: numerical and analytic calculation {#kl-cross-derivative-numerical-and-analytic-calculation}
 
 The `kl_derivative` option in `fit_mec_cox()` selects how one block of the
 stacked-sandwich Jacobian is evaluated. Its default is `"numerical"`;
@@ -1677,7 +1696,7 @@ comes from numerical approximation of the cross-derivative. The analytic
 identity uses the KL exponential weight map; it does not by itself provide
 the corresponding formula for a different Bregman generator.
 
-### Run or rebuild this manual
+### 4-3. Run or rebuild this manual {#run-or-rebuild-this-manual}
 
 Download the R Markdown source and run its chunks in order in RStudio, or use
 **Knit** to recreate this HTML page. After installing `mecCox`, the rendering
