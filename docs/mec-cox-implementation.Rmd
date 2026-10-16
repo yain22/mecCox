@@ -35,6 +35,11 @@ h2 { margin-top: 2em; }
 pre { font-size: 13px; }
 math[display="block"] { overflow-x: auto; padding: 0.5em 0; }
 table { margin: 1em 0; }
+.manual-figure { margin: 1.5em 0; }
+.manual-figure > p { margin: 0; }
+.manual-figure figcaption { margin-top: 0.8em; font-size: 0.95em;
+                            line-height: 1.55; }
+.manual-figure figcaption p { margin: 0.6em 0; }
 .algorithm-box { border-top: 2px solid #333; border-bottom: 1px solid #333;
                  padding: 0.6em 1em; margin: 1.5em 0; }
 .algorithm-box > p:first-child { border-bottom: 1px solid #777;
@@ -105,7 +110,15 @@ inverse-probability-weighted Cox regression framework, MEC-Cox estimates this
 comparison by retaining treated subjects with weight one and calibrating the
 analysis weights of the external controls.
 
+[Figure 1](#fig-problem-setting) shows the treated-population comparison and
+how cross-fitted propensity scores and control-survival features enter
+the MEC-Cox weighting and estimation steps.
+
+<figure id="fig-problem-setting" class="manual-figure">
+
 ```{tikz problem-setting-figure, echo=FALSE, dev='svg', out.width='100%', fig.alt='MEC-Cox problem setting. In the treated target population, treatment survival is observed subject to censoring and control survival is counterfactual. An upper source-propensity-model box uses both cohorts in each training fold to predict held-out propensity scores, which supply the baseline ATT odds. External controls are reweighted with these odds and MEC calibration to represent target control survival. Treated-cohort covariates determine target calibration totals. The target comparison is the marginal hazard ratio in the treated population.', engine.opts=list(classoption='tikz,border=5pt', extra.preamble=c('\\usepackage[T1]{fontenc}', '\\usepackage{times}', '\\usepackage[defaultmathsizes,italic]{mathastext}', '\\usetikzlibrary{arrows.meta,calc}'), dvisvgm.opts=c('--no-fonts', '--bbox=papersize'))}
+\newcommand{\steptag}[1]{{\setlength{\fboxsep}{1.5pt}%
+  \colorbox{yellow!55}{\strut\textbf{[Step #1]}}}}
 \begin{tikzpicture}[
   >=Latex,
   font=\small,
@@ -141,23 +154,23 @@ analysis weights of the external controls.
 \node[draw=blue!55!black, rounded corners=5pt, fill=blue!5,
       line width=0.7pt, text width=5.4cm, minimum height=1.85cm,
       align=center] (ps) at (11,4.45)
-  {\textbf{Source propensity model [Step 2]}\\[3pt]
+  {\textbf{Source propensity model} \steptag{2}\\[3pt]
    $\pi(X_i)=\Pr(A_i=1\mid X_i)$\\[3pt]
    Train on both cohorts in $\mathcal J^{(-k)}$\\[3pt]
    $\widehat\pi_i=\widehat\pi^{(-k)}(X_i),\quad i\in\mathcal J^{(k)}$};
 \node[draw=blue!55!black, rounded corners=5pt, fill=blue!10,
       line width=0.7pt, text width=4.6cm, minimum height=5.3cm,
       align=center] (mec) at (11,0)
-  {Baseline ATT odds $\widehat d_i$ [Step 2]\\[2pt]
+  {Baseline ATT odds $\widehat d_i$ \steptag{2}\\[2pt]
    $\downarrow$\\[2pt]
-   Bregman calibration [Step 3]\\[2pt]
+   Bregman calibration \steptag{3}\\[2pt]
    $H_0^\top w=T_H$\\[2pt]
    $\downarrow$\\[2pt]
-   Dual equation $F(\lambda)=0$ [Step 4]\\[2pt]
+   Dual equation $F(\lambda)=0$ \steptag{4}\\[2pt]
    $\downarrow$\\[2pt]
-   Newton solver: $\widehat\lambda$ [Step 5]\\[2pt]
+   Newton solver: $\widehat\lambda$ \steptag{5}\\[2pt]
    $\downarrow$\\[2pt]
-   MEC weights $\widehat w_i$ [Step 6]};
+   MEC weights $\widehat w_i$ \steptag{6}};
 \draw[flow] (ps.south) -- (mec.north);
 \draw[flow] (external.west) -- (mec.east);
 \draw[flow] (mec.west) -- (counterfactual.east);
@@ -166,7 +179,7 @@ analysis weights of the external controls.
 \node[draw=blue!55!black, rounded corners=5pt, fill=blue!5,
       line width=0.7pt, text width=4.5cm, minimum height=1.95cm,
       align=center] (survival) at (16.2,-3.65)
-  {\textbf{Survival features [Step 1]}\\[3pt]
+  {\textbf{Survival features} \steptag{1}\\[3pt]
    Fit Cox or RSF on training controls\\[3pt]
    Predict $\widehat h_i$ for held-out subjects\\in both cohorts};
 \draw[flow] (external.south) -- (survival.north);
@@ -176,38 +189,58 @@ analysis weights of the external controls.
 \node[align=center] at (3.9,-3.15)
   {\textbf{Target comparison}\\[3pt]
    $HR_{ATT}=\lambda_1^1(t)/\lambda_1^0(t)=\exp(\theta_{ATT})$\\[5pt]
-   Weighted Cox estimation [Step 6]\\[3pt]
+   Weighted Cox estimation \steptag{6}\\[3pt]
    $\widehat{HR}_{\mathrm{MEC}}=\exp(\widehat\theta_{\mathrm{MEC}})$};
 
 % Covariates from the treated cohort determine the target feature totals.
 \draw[flow, dashed] (treated.south) -- (1.9,-1.85)
   -- (0.3,-1.85) -- (0.3,-4.45) -- (11,-4.45) -- (mec.south);
 \node[align=center, anchor=north] at (6.45,-4.6)
-  {Treated-cohort feature totals [Step 3]\\
+  {Treated-cohort feature totals \steptag{3}\\
    $T_H=\sum_{i\in\mathcal I_1}\widehat h_i$};
 \end{tikzpicture}
 ```
 
-**Problem-setting illustration.** The green and orange circles describe the
-same treated target population under treatment and control. The purple circle
-describes the observed external-control population. The upper box fits the
-source propensity model on both cohorts in each training fold and predicts
-propensity scores for held-out subjects [Step 2]. Its downward arrow supplies
-the baseline ATT odds, normalized to the treated-cohort size. The lower-right
-box fits the control-survival learner on training-fold external controls and
-predicts survival features for held-out subjects from both cohorts [Step 1].
-These features enter the Bregman calibration problem [Step 3], its dual
-equation [Step 4], and the Newton solver [Step 5]. The resulting weights are
-used in the final weighted Cox estimation [Step 6]. Bracketed labels follow
-Steps 1–6 of Supplement S2.4 and Sections 2-1–2-6 below.
+<figcaption id="fig-problem-setting-caption">
 
-The horizontal arrows through the weighting box show how external controls
-are reweighted to represent the target population's control survival under
-the assumptions below. The dashed arrow supplies the target
-calibration totals from treated-cohort covariates. External controls retain
-their observed follow-up times and event indicators; MEC-Cox changes their
-analysis weights. The diagram is drawn directly by the editable TikZ chunk
-in this R Markdown source.
+**Figure 1. Target comparison and MEC-Cox computation.** The green and orange
+circles represent the same treated target population ($A_i=1$) under treatment and
+control, respectively; the purple circle represents the external-control
+population ($A_i=0$). Here $A_i$ identifies both cohort membership and received
+treatment, $X_i$ denotes baseline covariates, and $T_i^a$ is the potential event
+time under regime $a$. The treated cohort's control outcome $T_i^0$ is
+counterfactual. Observed follow-up is $Y_i=\min(T_i,C_i)$ with event indicator
+$\delta_i=I(T_i\le C_i)$, where $T_i$ is the event time under the received
+treatment and $C_i$ is the censoring time.
+
+The upper box fits the source propensity $\pi(X_i)=\Pr(A_i=1\mid X_i)$ using both
+cohorts in training set $\mathcal J^{(-k)}$ and predicts $\widehat\pi_i$ for
+subjects held out in fold $\mathcal J^{(k)}$. Its downward arrow supplies baseline
+ATT odds weights $\widehat d_i$, normalized so that external-control weights sum
+to the treated-cohort size. The lower-right box fits control survival on
+training-fold external controls and constructs held-out feature vectors $\widehat
+h_i$ for subjects in both cohorts. These vectors contain an intercept and
+predicted control survival at the landmark times. In the central box, $H_0$
+contains external-control feature rows and $T_H=\sum_{i\in\mathcal I_1}\widehat
+h_i$ is their target total over treated subjects, with $\mathcal I_1=\{i:A_i=1\}$.
+Bregman calibration imposes $H_0^\top w=T_H$ on the external-control weight vector
+$w$; its dual residual equation $F(\lambda)=0$ is solved by Newton iteration to
+obtain $\widehat\lambda$ and calibrated weights $\widehat w_i$.
+
+The horizontal arrows show the reweighting of external controls to represent
+target control survival under the stated identification assumptions; the dashed
+arrow supplies the treated-cohort feature totals. External controls retain their
+observed follow-up and event indicators. The final weighted Cox fit uses weight
+one for treated subjects and $\widehat w_i$ for external controls. Under the
+stated marginal proportional hazards model, the target is
+$HR_{ATT}=\lambda_1^1(t)/\lambda_1^0(t)=\exp(\theta_{ATT})$, where
+$\lambda_1^a(t)$ is the marginal hazard under regime $a$ in the treated target
+population. Yellow bracketed step labels refer to Steps 1–6 of Supplement S2.4 and
+Sections 2-1–2-6 below. The diagram is generated by the editable TikZ code in this
+R Markdown source.
+
+</figcaption>
+</figure>
 
 The source propensity score $\pi(X_i)=\Pr(A_i=1\mid X_i)$ describes how
 cohort membership varies with measured covariates. Its estimated odds provide
@@ -256,6 +289,11 @@ indicator $\delta_i$ in `event`. The baseline covariates $X_i$ are `age`,
 | $H_0,H_1,T_H$ | `H0`, `H1`, `T_H` | Cohort-specific feature matrices and target totals |
 | $\lambda,F(\lambda),J(\lambda)$ | `lambda`, `F`, `J` | Dual parameter, calibration residual, and Jacobian |
 | $\widehat w_i,\widetilde\omega_i$ | `w_hat`, `omega_tilde` | Calibrated control weights and final weights for all subjects |
+
+[Figure 2](#fig-data-structure) shows six rows from the simulated example,
+linking the cohort labels and survival notation to the columns used by the R code.
+
+<figure id="fig-data-structure" class="manual-figure">
 
 ```{r data-structure, echo=FALSE, fig.width=10, fig.height=4.2, dpi=180, out.width="100%", fig.alt="Six simulated subject rows: three treated subjects with source A_i equal to 1, and three external controls with source A_i equal to 0. Columns are row index, source, age, sex, marker, observed time, and event indicator."}
 local({
@@ -327,9 +365,23 @@ local({
 })
 ```
 
-**Data structure.** Selected rows from the simulated example, with values rounded
-for display. The row index $i$ refers to the original dataset. `time` is the
-observed follow-up time; `event` is 1 for an observed event and 0 for right censoring.
+<figcaption id="fig-data-structure-caption">
+
+**Figure 2. Subject-level structure of the simulated example.** Each row
+represents one subject from the package dataset `example_external_controls`; $i$
+is the row index in the original dataset. The three green rows are treated-cohort
+subjects (`source` $=A_i=1$), and the three purple rows are external controls
+(`source` $=A_i=0$); the colored brackets identify the two cohorts. The baseline
+covariate vector $X_i$ contains `age`, `sex`, and `marker`. The `time` column
+records $Y_i=\min(T_i,C_i)$, where $T_i$ and $C_i$ are event and censoring times.
+The `event` column records $\delta_i=I(T_i\le C_i)$: 1 denotes an observed event
+and 0 denotes right censoring. Two event rows and one censored row from each
+cohort are selected for illustration; this display is not the complete dataset.
+Numeric values are rounded for display. The letters A–F above the column names are
+spreadsheet-style column labels, distinct from the source indicator $A_i$.
+
+</figcaption>
+</figure>
 
 ```{r data}
 library(mecCox)
@@ -380,6 +432,12 @@ calibration-feature vector
 
 Here $L=p-1$ is the number of landmark times. Every non-intercept component
 is an out-of-sample prediction for subject $i$.
+
+[Figure 3](#fig-cross-fitting) shows how each fold is held out in turn to
+construct these predictions. The same partition also supplies the held-out
+source-propensity estimates used in Step 2.
+
+<figure id="fig-cross-fitting" class="manual-figure">
 
 ```{tikz cross-fitting-figure, echo=FALSE, dev='svg', out.width='100%', fig.alt='K-fold cross-fitting. Each row holds out one validation fold, trains nuisance learners on the other folds, and evaluates predictions for the held-out subjects.', engine.opts=list(classoption='tikz,border=3pt', extra.preamble=c('\\usepackage[T1]{fontenc}', '\\usepackage{times}', '\\usepackage[defaultmathsizes,italic]{mathastext}', '\\usetikzlibrary{arrows.meta,calc,decorations.pathreplacing}'), dvisvgm.opts=c('--no-fonts', '--bbox=papersize'))}
 \begin{tikzpicture}[
@@ -468,10 +526,32 @@ is an out-of-sample prediction for subject $i$.
 \end{tikzpicture}
 ```
 
-**Figure S1.** Schematic illustration of $K$-fold cross-fitting, drawn from
-the supplement's editable TikZ code. Within each training set, the propensity
-learner uses both cohorts and the control-survival learner uses external
-controls only. Both are evaluated on subjects in the held-out fold.
+<figcaption id="fig-cross-fitting-caption">
+
+**Figure 3. Construction of out-of-fold nuisance predictions by $K$-fold
+cross-fitting (Supplement Figure S1).** The pooled sample of $n$ subjects is
+partitioned into folds $\mathcal J^{(1)},\ldots,\mathcal J^{(K)}$, stratified by
+source indicator $A_i$ ($1$ for treated subjects and $0$ for external controls).
+In row $k$, the blue block is the held-out validation fold $\mathcal J^{(k)}$; the
+gray blocks form its training complement $\mathcal
+J^{(-k)}=\{1,\ldots,n\}\setminus\mathcal J^{(k)}$. The arrows indicate fitting
+nuisance learners on the training subjects and then evaluating predictions for the
+held-out subjects. The source-propensity learner uses both cohorts in $\mathcal
+J^{(-k)}$, whereas the control-survival learner uses only external controls in
+$\mathcal I_0\cap\mathcal J^{(-k)}$, where $\mathcal I_0=\{i:A_i=0\}$.
+
+Both learners predict for every subject in $\mathcal J^{(k)}$. If $\kappa(i)$ is
+subject $i$'s fold, these predictions give
+$\widehat\pi_i=\widehat\pi^{(-\kappa(i))}(X_i)$ and $\widehat h_i=(1,\widehat
+S_0^{(-\kappa(i))}(t_1\mid X_i),\ldots,\widehat S_0^{(-\kappa(i))}(t_L\mid X_i))$,
+where $X_i$ is the baseline covariate vector, $\widehat S_0$ predicts control
+survival, and $t_1,\ldots,t_L$ are the landmark times. Repeating the procedure
+over all $K$ folds supplies one held-out feature vector and propensity prediction
+per subject. The same folds are used for both learners. The schematic is drawn
+from the supplement's editable TikZ code; the worked example uses $K=5$.
+
+</figcaption>
+</figure>
 
 The same fold assignment is used for both learners throughout the calculation.
 
