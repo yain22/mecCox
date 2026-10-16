@@ -100,7 +100,8 @@ the parameter of interest is the ATT marginal hazard ratio
 HR_{ATT}=\frac{\lambda_1^1(t)}{\lambda_1^0(t)}
 =\exp(\theta_{ATT}).
 \]
-Both hazards refer to the treated target population. MEC-Cox estimates this
+Both hazards refer to the treated target population. Under the
+inverse-probability-weighted Cox regression framework, MEC-Cox estimates this
 comparison by retaining treated subjects with weight one and calibrating the
 analysis weights of the external controls.
 
