@@ -8,9 +8,12 @@
 # Results stay in R, with formatted tables in the RStudio Viewer and plots in
 # the active graphics window. The script does not save result files.
 
-quick_run <- FALSE
-cores <- 20L
-replications <- 1000L
+# Choose one option: keep its settings line uncommented.
+# Publication replication (full study; takes a long time)
+quick_run <- FALSE; cores <- 20L; replications <- 1000L
+
+# Quick learning (explore the code with fewer design cells)
+# quick_run <- TRUE; cores <- 20L; replications <- 200L
 
 # source() records the current file in an `ofile` frame. Selected lines in an
 # editor have no such frame, so also look in the working directory and package.
