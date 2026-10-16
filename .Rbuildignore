@@ -1,4 +1,5 @@
 ^data-raw$
+^docs$
 ^\.github$
 ^LICENSE\.md$
 ^inst/reproduce/SQUIRE_Section6_encrypted\.zip$

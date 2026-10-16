@@ -17,6 +17,15 @@ install.packages("remotes")
 remotes::install_github("yain22/mecCox", dependencies = TRUE)
 ```
 
+## MEC-Cox implementation
+
+Following Supplement S2.4, MEC-Cox constructs cross-fitted survival features
+and baseline ATT weights, formulates the calibration problem, and solves its
+dual equation by Newton iteration. The calibrated weights then enter the
+final weighted Cox regression. The [HTML manual](https://yain22.github.io/mecCox/mec-cox-implementation.html)
+follows all six steps with the supplement's notation and executable R code;
+the [R Markdown source](docs/mec-cox-implementation.Rmd) is also available.
+
 ## Toy analysis
 
 ```r

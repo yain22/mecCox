@@ -1,0 +1,478 @@
+---
+title: "MEC-Cox implementation"
+subtitle: "A worked example following Supplement S2.4"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: false
+    theme: readable
+    highlight: tango
+    self_contained: true
+    math_method: mathml
+    code_download: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", error = FALSE)
+options(width = 88, digits = 6)
+```
+
+<style>
+body { line-height: 1.65; }
+.main-container { max-width: 980px; }
+h2 { margin-top: 2em; }
+pre { font-size: 13px; }
+math[display="block"] { overflow-x: auto; padding: 0.5em 0; }
+table { margin: 1em 0; }
+</style>
+
+This manual follows **Steps 1–6 of Supplement S2.4, “Computation of the
+MEC-Cox Estimator via the Dual Newton Solver,”** in the same order and with
+the same notation. Each formula is followed by the R code that implements it.
+The example uses the package's simulated data, logistic regression for source
+propensity, Cox regression for control survival, and the Kullback–Leibler (KL)
+generator. The general generator notation from the supplement is retained.
+
+[R Markdown source](https://github.com/yain22/mecCox/blob/main/docs/mec-cox-implementation.Rmd)
+· [Package repository](https://github.com/yain22/mecCox)
+
+## Data and notation
+
+The source indicator is $A_i=1$ for the treated cohort and $A_i=0$ for external
+controls. Write $\mathcal I_a=\{i:A_i=a\}$ and $n_a=|\mathcal I_a|$.
+The observed follow-up time and event indicator are stored in `time` and
+`event`. The baseline covariates $X_i$ are `age`, `sex`, and `marker`.
+
+| Supplement notation | R object | Meaning |
+|:---|:---|:---|
+| $A_i$; $\mathcal I_0,\mathcal I_1$ | `A`; `I0`, `I1` | Source indicator and cohort row indices |
+| $K$; $\kappa(i)$ | `K`; `kappa` | Number of folds and each subject's fold |
+| $t_1,\ldots,t_L$, $L=p-1$ | `t_landmark`; `L`, `p` | Landmark times and number of calibration features |
+| $\widehat h_i$ | row `i` of `H` | Intercept and held-out control-survival predictions |
+| $\widehat\pi_i,\widehat q_i,\widehat d_i$ | `pi_hat`, `q_hat`, `d_hat` | Propensity, odds, and normalized baseline control weights |
+| $H_0,H_1,T_H$ | `H0`, `H1`, `T_H` | Cohort-specific feature matrices and target totals |
+| $\lambda,F(\lambda),J(\lambda)$ | `lambda`, `F`, `J` | Dual parameter, calibration residual, and Jacobian |
+| $\widehat w_i,\widetilde\omega_i$ | `w_hat`, `omega_tilde` | Calibrated control weights and final weights for all subjects |
+
+```{r data}
+library(mecCox)
+library(survival)
+data(example_external_controls)
+dat <- example_external_controls
+
+A <- dat$source
+I0 <- which(A == 0L)
+I1 <- which(A == 1L)
+n <- nrow(dat)
+n0 <- length(I0)
+n1 <- length(I1)
+dat$A <- A
+X_names <- c("age", "sex", "marker")
+
+K <- 5L
+seed <- 2026L
+t_landmark <- c(3, 6, 9, 12, 15)
+L <- length(t_landmark)
+p <- L + 1L
+
+data.frame(treated = n1, external_controls = n0,
+           folds = K, landmarks = L, calibration_features = p)
+```
+
+Run the code chunks in order. The five landmark times are fixed for this
+example; the same times and folds will be used in the package comparison.
+
+## Step 1. Construction of the cross-fitted predictor basis
+
+Partition the pooled sample into $K$ folds, stratified by $A_i$, and let
+$\kappa(i)$ identify the fold containing subject $i$. For each fold $k$, train
+the control-survival learner using only $\mathcal I_0\cap\mathcal J^{(-k)}$,
+then predict survival for **all** subjects in the held-out fold $\mathcal J^{(k)}$.
+The calibration-feature vector is
+
+\[
+\widehat h_i=
+\left(1,\widehat S_0^{(-\kappa(i))}(t_1\mid X_i),\ldots,
+\widehat S_0^{(-\kappa(i))}(t_{p-1}\mid X_i)\right)\in\mathbb R^p.
+\]
+
+For the Cox survival learner used here,
+
+\[
+\widehat S_{0,\mathrm{Cox}}^{(-k)}(t_\ell\mid X_i)=
+\exp\left[-\widehat\Lambda_{00}^{(-k)}(t_\ell)
+\exp\{X_i^\top\widehat\beta_0^{(-k)}\}\right].
+\]
+
+```{r predictor-basis}
+set.seed(seed)
+kappa <- integer(n)
+for (a in c(0L, 1L)) {
+  rows <- which(A == a)
+  kappa[rows] <- sample(rep(seq_len(K), length.out = length(rows)))
+}
+
+S0_hat <- matrix(NA_real_, nrow = n, ncol = L)
+survival_formula <- reformulate(X_names, response = "Surv(time, event)")
+
+for (k in seq_len(K)) {
+  train0 <- which(kappa != k & A == 0L)
+  valid <- which(kappa == k)
+
+  outcome_fit <- coxph(
+    survival_formula, data = dat[train0, ],
+    ties = "breslow", x = TRUE, singular.ok = FALSE,
+    control = coxph.control(timefix = FALSE)
+  )
+
+  # Evaluate the baseline cumulative hazard at each landmark.
+  baseline <- basehaz(outcome_fit, centered = FALSE)
+  j <- findInterval(t_landmark, baseline$time)
+  Lambda00_hat <- numeric(L)
+  Lambda00_hat[j > 0L] <- baseline$hazard[j[j > 0L]]
+
+  # Uncentered linear predictors match the uncentered baseline hazard.
+  lp <- predict(outcome_fit, newdata = dat[valid, ],
+                type = "lp", reference = "zero")
+  S0_hat[valid, ] <- exp(-outer(exp(lp), Lambda00_hat))
+}
+
+colnames(S0_hat) <- paste0("S0(t=", t_landmark, ")")
+H <- cbind(intercept = 1, S0_hat)
+stopifnot(all(is.finite(H)), all(S0_hat >= 0 & S0_hat <= 1))
+head(H, 3)
+```
+
+Each row is predicted without using that subject to train the survival model.
+These predictions enter the calibration features; the final Cox model in Step 6
+uses the source indicator $A_i$ as its sole regression covariate.
+
+## Step 2. Baseline ATT odds weights
+
+Using the same folds, fit the source propensity model on the **pooled training
+sample** $\mathcal J^{(-k)}$. Evaluate it on $\mathcal J^{(k)}$ to obtain
+$\widehat\pi_i=\widehat\pi^{(-k)}(X_i)$.
+For $i\in\mathcal I_0$, form
+
+\[
+\widehat q_i=\frac{\widehat\pi_i}{1-\widehat\pi_i},
+\qquad
+\widehat d_i=\frac{n_1\widehat q_i}
+{\sum_{j\in\mathcal I_0}\widehat q_j},
+\qquad
+\sum_{i\in\mathcal I_0}\widehat d_i=n_1.
+\]
+
+```{r baseline-weights}
+pi_hat <- numeric(n)
+propensity_formula <- reformulate(X_names, response = "A")
+
+for (k in seq_len(K)) {
+  train <- which(kappa != k)
+  valid <- which(kappa == k)
+  propensity_fit <- glm(propensity_formula, data = dat[train, ],
+                        family = binomial())
+  stopifnot(isTRUE(propensity_fit$converged))
+  pi_hat[valid] <- predict(propensity_fit, newdata = dat[valid, ],
+                           type = "response")
+}
+
+ps_trim <- c(0.01, 0.99)
+pi_hat <- pmin(pmax(pi_hat, ps_trim[1]), ps_trim[2])
+q_hat <- pi_hat[I0] / (1 - pi_hat[I0])
+d_hat <- n1 * q_hat / sum(q_hat)
+
+stopifnot(all(is.finite(d_hat)), all(d_hat > 0))
+c(baseline_weight_total = sum(d_hat), treated_count = n1)
+```
+
+The truncation bounds are explicit so that the hand calculation and the package
+use the same propensity scores. `d_hat` contains external-control weights only,
+in the order specified by `I0`.
+
+## Step 3. Formulation of the primal problem
+
+Stack the rows $\widehat h_i$ within each cohort to obtain
+$H_0\in\mathbb R^{n_0\times p}$ and $H_1\in\mathbb R^{n_1\times p}$.
+The target calibration total is
+
+\[
+T_H=H_1^\top\mathbf 1_{n_1}
+=\sum_{i\in\mathcal I_1}\widehat h_i\in\mathbb R^p.
+\]
+
+The primal problem is
+
+\[
+\widehat w=\arg\min_{\{w_i>0:i\in\mathcal I_0\}}
+\sum_{i\in\mathcal I_0}D_G(w_i\|\widehat d_i)
+\quad\text{subject to}\quad H_0^\top w=T_H,
+\]
+
+where $D_G(w_i\|\widehat d_i)=G(w_i)-G(\widehat d_i)
+-g(\widehat d_i)(w_i-\widehat d_i)$, $G$ is strictly convex, and $g=G'$.
+The intercept constraint preserves the total external-control weight $n_1$;
+the other constraints match the treated cohort's predicted-survival totals.
+
+```{r primal-problem}
+H0 <- H[I0, , drop = FALSE]
+H1 <- H[I1, , drop = FALSE]
+T_H <- colSums(H1)
+
+# KL generator from the manuscript: G(u) = u log(u), for u > 0.
+G <- function(u) u * log(u)
+g <- function(u) 1 + log(u)
+g_inv <- function(v) exp(v - 1)
+g_prime <- function(u) 1 / u
+
+data.frame(feature = colnames(H),
+           treated_total = T_H,
+           baseline_control_total = as.numeric(crossprod(H0, d_hat)),
+           row.names = NULL)
+```
+
+We form this problem explicitly, then solve its $p$-dimensional dual instead of
+optimizing over $n_0$ weights.
+
+## Step 4. Conversion to the dual problem
+
+Use the same Lagrangian sign as the supplement:
+
+\[
+\mathcal L(w,\lambda)=\sum_{i\in\mathcal I_0}D_G(w_i\|\widehat d_i)
+-\lambda^\top(H_0^\top w-T_H).
+\]
+
+Stationarity gives $g(w_i)=g(\widehat d_i)+\lambda^\top\widehat h_i$, hence
+
+\[
+w_i(\lambda)=g^{-1}\{g(\widehat d_i)+\lambda^\top\widehat h_i\},
+\qquad F(\lambda)=H_0^\top w(\lambda)-T_H=0.
+\]
+
+This is the dual estimating equation. For the KL choice above,
+$g(u)=1+\log u$ and $g^{-1}(v)=\exp(v-1)$, so
+$w_i(\lambda)=\widehat d_i\exp(\lambda^\top\widehat h_i)$.
+
+```{r dual-problem}
+w_of_lambda <- function(lambda) {
+  nu <- g(d_hat) + as.numeric(H0 %*% lambda)
+  g_inv(nu)
+}
+
+F <- function(lambda) {
+  as.numeric(crossprod(H0, w_of_lambda(lambda)) - T_H)
+}
+
+lambda0 <- numeric(p)
+stopifnot(max(abs(w_of_lambda(lambda0) - d_hat)) < 1e-12)
+```
+
+## Step 5. Dual Newton solver
+
+Define $\nu_i(\lambda)=g(\widehat d_i)+\lambda^\top\widehat h_i$.
+The dual domain contains values of $\lambda$ for which every
+$\nu_i(\lambda)$ belongs to $\operatorname{dom}(g^{-1})$.
+The Jacobian and Newton update are
+
+\[
+J(\lambda)=H_0^\top\operatorname{diag}
+\left[\frac{1}{g'\{w_i(\lambda)\}}:i\in\mathcal I_0\right]H_0,
+\]
+\[
+\{J(\lambda_m)+\rho I_p\}\Delta_m=F(\lambda_m),
+\qquad \lambda_{m+1}=\lambda_m-\alpha_m\Delta_m.
+\]
+
+For KL, $1/g'(w_i)=w_i$. The code uses the supplement's choices
+$\rho=10^{-8}$, $\varepsilon=10^{-10}$, and at most 100 Newton updates.
+Each update starts with $\alpha_m=1$. KL has
+$\operatorname{dom}(g^{-1})=\mathbb R$; the step-halving guard below also
+rejects weights that overflow or underflow in finite-precision arithmetic.
+Convergence requires $\|F(\widehat\lambda)\|_2\le\varepsilon$.
+
+```{r newton-solver}
+J <- function(lambda) {
+  w <- w_of_lambda(lambda)
+  crossprod(H0, H0 * (1 / g_prime(w)))
+}
+
+rho <- 1e-8
+epsilon <- 1e-10
+max_iter <- 100L
+lambda <- lambda0
+converged <- FALSE
+history <- data.frame(iteration = integer(), residual_L2 = numeric())
+
+for (m in 0:max_iter) {
+  residual <- F(lambda)
+  residual_L2 <- sqrt(sum(residual^2))
+  history <- rbind(history, data.frame(iteration = m,
+                                      residual_L2 = residual_L2))
+  if (is.finite(residual_L2) && residual_L2 <= epsilon) {
+    converged <- TRUE
+    break
+  }
+  if (m == max_iter) break
+
+  Delta <- solve(J(lambda) + rho * diag(p), residual)
+  alpha <- 1
+  accepted <- FALSE
+  for (halving in 0:60) {
+    candidate <- lambda - alpha * Delta
+    w_candidate <- w_of_lambda(candidate)
+    if (all(is.finite(w_candidate)) && all(w_candidate > 0)) {
+      accepted <- TRUE
+      break
+    }
+    alpha <- alpha / 2
+  }
+  if (!accepted) stop("No admissible Newton step was found.")
+  lambda <- candidate
+}
+
+if (!converged) stop("The dual solver did not reach the stated tolerance.")
+lambda_hat <- lambda
+w_hat <- w_of_lambda(lambda_hat)
+history
+```
+
+The balance table makes the constraint $H_0^\top\widehat w=T_H$ visible.
+
+```{r calibration-check}
+knitr::kable(data.frame(
+  feature = colnames(H),
+  treated_mean = T_H / n1,
+  baseline_control_mean = as.numeric(crossprod(H0, d_hat)) / n1,
+  calibrated_control_mean = as.numeric(crossprod(H0, w_hat)) / n1
+), digits = 6, row.names = FALSE,
+col.names = c("Feature", "Treated mean", "Baseline control mean",
+              "Calibrated control mean"))
+```
+
+## Step 6. Final MEC-Cox estimator
+
+Recover $\widehat w_i=g^{-1}\{g(\widehat d_i)+\widehat\lambda^\top\widehat h_i\}$
+for external controls. The final estimating-equation weights are
+
+\[
+\widetilde\omega_i=A_i+(1-A_i)\widehat w_i.
+\]
+
+Treated subjects retain weight one. Using these weights, define
+
+\[
+S_{\mathrm{MEC},\omega}^{(r)}(t;\theta)
+=\sum_{i=1}^n\widetilde\omega_i\mathcal Y_i(t)
+\exp(\theta A_i)A_i^r,\qquad r=0,1,
+\]
+\[
+\overline A_{\mathrm{MEC},\omega}(t;\theta)
+=\frac{S_{\mathrm{MEC},\omega}^{(1)}(t;\theta)}
+{S_{\mathrm{MEC},\omega}^{(0)}(t;\theta)}.
+\]
+
+Here $\mathcal Y_i(t)$ is the at-risk indicator and $\mathcal N_i(t)$ is the
+event counting process. Solve
+
+\[
+U_n^{\mathrm{MEC}}(\theta)=\sum_{i=1}^n\int\widetilde\omega_i
+\{A_i-\overline A_{\mathrm{MEC},\omega}(t;\theta)\}\,d\mathcal N_i(t)=0
+\]
+
+and report $\widehat{\mathrm{HR}}_{\mathrm{MEC}}=\exp(\widehat\theta_{\mathrm{MEC}})$.
+In R, the point estimate is obtained by fitting a weighted Cox model with
+`A` as its sole covariate. Breslow handling of tied events matches the package.
+
+```{r final-estimator}
+omega_tilde <- rep(1, n)
+omega_tilde[I0] <- w_hat
+dat$omega_tilde <- omega_tilde
+
+final_fit <- coxph(
+  Surv(time, event) ~ A, data = dat, weights = omega_tilde,
+  ties = "breslow", robust = FALSE,
+  control = coxph.control(timefix = FALSE)
+)
+theta_hat <- unname(coef(final_fit)["A"])
+HR_hat <- exp(theta_hat)
+data.frame(log_hazard_ratio = theta_hat, hazard_ratio = HR_hat)
+```
+
+This step illustrates the point estimator. For the MEC stacked-sandwich
+standard error and confidence interval, use `fit_mec_cox()` as below; the
+ordinary weighted `coxph()` standard error is not that variance estimator.
+
+## Agreement with `fit_mec_cox()`
+
+The package call performs these calculations together. We supply the same
+learners, folds, landmark times, and propensity bounds used above.
+
+```{r package-comparison}
+mec <- fit_mec_cox(
+  example_external_controls,
+  time = "time", event = "event", source = "source",
+  covariates = X_names, ps_learner = "glm", survival_learner = "cox",
+  n_folds = K, landmarks = t_landmark, seed = seed, ps_trim = ps_trim
+)
+
+# First verify the ingredients, before comparing the calibrated estimates.
+stopifnot(
+  identical(kappa, mec$fold_id),
+  max(abs(pi_hat - mec$ps_oof)) < 1e-12,
+  max(abs(H - mec$basis)) < 1e-12,
+  max(abs(d_hat - mec$baseline_weights[I0])) < 1e-12
+)
+
+knitr::kable(data.frame(
+  calculation = c("Steps 1-6", "fit_mec_cox()"),
+  log_hazard_ratio = c(theta_hat, mec$theta),
+  hazard_ratio = c(HR_hat, mec$hr),
+  control_weight_total = c(sum(w_hat), sum(mec$weights[I0])),
+  max_mean_balance_residual = format(
+    c(max(abs(F(lambda_hat))) / n1,
+      mec$calibration$max_mean_balance_residual), scientific = TRUE, digits = 3
+  )
+), digits = 6,
+col.names = c("Calculation", "Log HR", "HR", "Control weight total",
+              "Max. mean residual"))
+
+stopifnot(max(abs(w_hat - mec$weights[I0])) < 1e-5,
+          abs(theta_hat - mec$theta) < 1e-7)
+```
+
+The worked solver uses S2.4's numerical choices. The package solves the same
+KL balance equation using a scaled ridge, a dual-objective line search, and
+`calibration_tol` applied to $\max|F|/n_1$ (default $10^{-8}$). Accordingly,
+the comparison checks numerical agreement rather than identical iterations.
+The public `fit_mec_cox()` implementation uses KL calibration; the supplement's
+general $G$ notation also describes other generators.
+
+For routine analysis, the package also returns the MEC uncertainty estimates:
+
+```{r uncertainty}
+data.frame(hazard_ratio = mec$hr, SE_log_hazard_ratio = mec$se,
+           CI_lower = unname(mec$conf_int["lower"]),
+           CI_upper = unname(mec$conf_int["upper"]))
+```
+
+## Run or rebuild this manual
+
+Download the R Markdown source and run its chunks in order in RStudio, or use
+**Knit** to recreate this HTML page. After installing `mecCox`, the rendering
+tools can be installed with `install.packages(c("rmarkdown", "knitr"))`.
+From the repository root, render with:
+
+```{r render-manual, eval=FALSE}
+rmarkdown::render("docs/mec-cox-implementation.Rmd")
+```
+
+The calculations above were executed when this HTML was generated.
+
+```{r versions}
+data.frame(component = c("R", "mecCox", "survival"),
+           version = c(as.character(getRversion()),
+                       as.character(packageVersion("mecCox")),
+                       as.character(packageVersion("survival"))))
+```
