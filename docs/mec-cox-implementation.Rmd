@@ -66,14 +66,150 @@ alternatives. The general generator notation from the supplement is retained.
 
 ## 1. Data and notation {#data-and-notation}
 
-The source indicator is $A_i=1$ for the treated cohort and $A_i=0$ for external
-controls. Write $\mathcal I_a=\{i:A_i=a\}$ and $n_a=|\mathcal I_a|$.
-The observed follow-up time and event indicator are stored in `time` and
-`event`. The baseline covariates $X_i$ are `age`, `sex`, and `marker`.
+### 1-1. Problem setting {#problem-setting}
+
+We combine a **treated target cohort** with an **external-control cohort**,
+such as controls from a historical trial or another data source. For subject
+$i$, the indicator $A_i=1$ identifies a treated-cohort member receiving the
+treatment of interest, whereas $A_i=0$ identifies an external-control member
+receiving control. Source membership and treatment status therefore coincide
+in this setting. The two cohorts can differ in their baseline covariates
+$X_i$, including characteristics that predict survival.
+
+Let $T_i^a$ be the potential event time under treatment regime $a$, with
+$a=1$ denoting treatment and $a=0$ denoting control. The target comparison is
+between $T_i^1\mid A_i=1$ and $T_i^0\mid A_i=1$: the survival experience of
+the treated target population under each regime. For a treated subject, the
+control potential event time is unobserved. External controls contribute
+information about control survival through their observed follow-up. With
+$T_i$ denoting the event time under the treatment actually received and $C_i$
+the censoring time, each subject contributes
+$Y_i=\min(T_i,C_i)$ and $\delta_i=I(T_i\le C_i)$.
+
+Write $S_1^a(t)=\Pr(T_i^a>t\mid A_i=1)$ for marginal survival under regime
+$a$ in the treated target population, and let $\lambda_1^a(t)$ be the
+corresponding marginal hazard. The subscript $1$ identifies the target
+population; the superscript $a$ identifies the treatment regime. Under the
+paper's marginal proportional hazards model,
+\[
+\lambda_1^a(t)=\lambda_1^0(t)\exp(\theta_{ATT}a),
+\qquad a=0,1,
+\]
+the parameter of interest is the ATT marginal hazard ratio
+\[
+HR_{ATT}=\frac{\lambda_1^1(t)}{\lambda_1^0(t)}
+=\exp(\theta_{ATT}).
+\]
+Both hazards refer to the treated target population. MEC-Cox estimates this
+comparison by retaining treated subjects with weight one and calibrating the
+analysis weights of the external controls.
+
+```{tikz problem-setting-figure, echo=FALSE, dev='svg', out.width='100%', fig.alt='MEC-Cox problem setting. In the treated target population, treatment survival is observed subject to censoring and control survival is counterfactual. External controls are reweighted with baseline ATT odds and MEC calibration to represent target control survival. Treated-cohort covariates determine target calibration totals. The target comparison is the marginal hazard ratio in the treated population.', engine.opts=list(classoption='tikz,border=5pt', extra.preamble=c('\\usepackage[T1]{fontenc}', '\\usepackage{times}', '\\usepackage[defaultmathsizes,italic]{mathastext}', '\\usetikzlibrary{arrows.meta,calc}'), dvisvgm.opts=c('--no-fonts', '--bbox=papersize'))}
+\begin{tikzpicture}[
+  >=Latex,
+  font=\small,
+  cohort/.style={draw=blue!35!black, line width=0.7pt,
+    circle, minimum size=3.2cm, text width=2.65cm, inner sep=1pt, align=center},
+  flow/.style={->, draw=blue!55!black, line width=1pt},
+  frame/.style={draw=blue!35!black, dashed, line width=0.6pt},
+  label/.style={align=center, font=\small\bfseries}
+]
+% The two potential survival experiences refer to the same target population.
+\draw[frame, fill=gray!2] (0,-2.1) rectangle (7.8,2.1);
+\node[label] at (3.9,2.55) {Treated target population: $A_i=1$};
+\node[cohort, fill=green!18] (treated) at (1.9,0)
+  {\textbf{Under treatment}\\[3pt]
+   $T_i^1\mid A_i=1$\\[3pt]
+   Observed through\\$(Y_i,\delta_i)$};
+\node[cohort, fill=orange!15, dashed] (counterfactual) at (5.9,0)
+  {\textbf{Under control}\\[3pt]
+   $T_i^0\mid A_i=1$\\[3pt]
+   Counterfactual\\for treated subjects};
+\node at (3.9,0) {vs.};
+
+% External records keep their observed follow-up; their weights are changed.
+\draw[frame, fill=gray!2] (14.2,-2.1) rectangle (18.2,2.1);
+\node[label] at (16.2,2.55) {External-control population\\$A_i=0$};
+\node[cohort, fill=violet!16] (external) at (16.2,0)
+  {\textbf{Under control}\\[3pt]
+   $T_i^0\mid A_i=0$\\[3pt]
+   Observed through\\$(Y_i,\delta_i)$};
+
+\node[label] at (11,2.55) {Reweight external controls};
+\node[draw=blue!55!black, rounded corners=5pt, fill=blue!10,
+      line width=0.7pt, text width=3.65cm, minimum height=3.3cm,
+      align=center] (mec) at (11,0)
+  {Baseline ATT odds $\widehat d_i$\\[2pt]
+   $\downarrow$\\[2pt]
+   Calibrate survival features\\$\widehat h_i$ to target totals $T_H$\\[2pt]
+   $\downarrow$\\[2pt]
+   MEC weights $\widehat w_i$};
+\draw[flow] (external.west) -- (mec.east);
+\draw[flow] (mec.west) -- (counterfactual.east);
+
+\node[align=center] at (3.9,-2.8)
+  {\textbf{Target comparison}\\[3pt]
+   $HR_{ATT}=\lambda_1^1(t)/\lambda_1^0(t)=\exp(\theta_{ATT})$};
+
+% Covariates from the treated cohort determine the target feature totals.
+\draw[flow, dashed] (treated.south) -- (1.9,-1.85)
+  -- (0.3,-1.85) -- (0.3,-3.8) -- (11,-3.8) -- (mec.south);
+\node[align=center, anchor=north] at (6.45,-3.95)
+  {Treated-cohort covariates $X_i$ determine\\
+   the target feature totals $T_H=\sum_{i\in\mathcal I_1}\widehat h_i$};
+\end{tikzpicture}
+```
+
+**Problem-setting illustration.** The green and orange circles describe the
+same treated target population under treatment and control. The purple circle
+describes the observed external-control population. The solid arrows show how
+external controls are reweighted to represent the target population's control
+survival under the assumptions below. The dashed arrow supplies the target
+calibration totals from treated-cohort covariates. External controls retain
+their observed follow-up times and event indicators; MEC-Cox changes their
+analysis weights. The diagram is drawn directly by the editable TikZ chunk
+in this R Markdown source.
+
+The source propensity score $\pi(X_i)=\Pr(A_i=1\mid X_i)$ describes how
+cohort membership varies with measured covariates. Its estimated odds provide
+the normalized baseline ATT weights $\widehat d_i$ for external controls.
+MEC-Cox then updates these weights to $\widehat w_i$ so that selected
+cross-fitted control-survival features $\widehat h_i$ have the same totals
+in the weighted external controls and the treated cohort. The treated total
+is $T_H=\sum_{i\in\mathcal I_1}\widehat h_i$, where
+$\mathcal I_a=\{i:A_i=a\}$. Steps 1–5 below construct these quantities and
+solve the calibration problem; Step 6 fits the final weighted Cox model and
+reports $\widehat{HR}_{\mathrm{MEC}}=\exp(\widehat\theta_{\mathrm{MEC}})$.
+The learner's $S_0(t\mid X_i)$ in Step 1 is conditional control survival;
+$S_1^a(t)$ above is marginal survival in the treated target population.
+
+The causal interpretation relies on consistency,
+$T_i=A_iT_i^1+(1-A_i)T_i^0$, and on **survival transportability**:
+\[
+T_i^0\mid X_i,A_i=1\ \overset{d}{=}\ T_i^0\mid X_i,A_i=0.
+\]
+Thus, subjects with the same measured covariates must have the same control
+potential-event-time distribution in the two source populations. The paper
+also assumes **positivity**: for some $\epsilon>0$,
+$1-\pi(x)\ge\epsilon$ on the covariate support of the treated population,
+so that external controls are available for the covariate profiles being
+targeted. The survival analysis additionally uses independent subjects and
+the paper's source-specific independent-censoring conditions. Calibration
+balances the selected survival features; causal interpretation still depends
+on these assumptions and the stated marginal proportional hazards model.
+
+### 1-2. Observed data and notation {#observed-data-and-notation}
+
+Write $\mathcal I_a=\{i:A_i=a\}$ and $n_a=|\mathcal I_a|$ for cohort row
+indices and sizes. In the simulated example, the source indicator $A_i$ is
+stored in `source`, the observed follow-up time $Y_i$ in `time`, and the event
+indicator $\delta_i$ in `event`. The baseline covariates $X_i$ are `age`,
+`sex`, and `marker`.
 
 | Supplement notation | R object | Meaning |
 |:---|:---|:---|
 | $A_i$; $\mathcal I_0,\mathcal I_1$ | `A`; `I0`, `I1` | Source indicator and cohort row indices |
+| $X_i$; $Y_i,\delta_i$ | `age`, `sex`, `marker`; `time`, `event` | Baseline covariates; observed follow-up time and event indicator |
 | $K$; $\kappa(i)$ | `K`; `kappa` | Number of folds and each subject's fold |
 | $t_1,\ldots,t_L$, $L=p-1$ | `t_landmark`; `L`, `p` | Landmark times and number of calibration features |
 | $\widehat h_i$ | row `i` of `H` | Intercept and held-out control-survival predictions |
