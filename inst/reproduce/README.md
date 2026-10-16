@@ -17,11 +17,6 @@ export, and the simulation figures can be exported explicitly from R.
 The [case-study instructions](#public-breast-cancer-case-study) appear below
 the simulation instructions.
 
-For the fresh supplemental Figures S2-S4, see the
-[reference, redraw, and selected-job instructions](../../README.md#supplemental-figures-s2s4).
-These callable helpers preserve the distinct supplemental designs and require
-explicit function calls after sourcing.
-
 ## Toy example
 
 The toy script reproduces both prognostic-balance designs in the paper.
@@ -384,8 +379,7 @@ two MEC-Cox variants use cross-fitted BART source
 probabilities and either Cox or RSF control-survival predictions, with ten
 folds and five landmarks. BART uses the frozen choice of 100 trees,
 shrinkage parameter 2, 300 retained draws and 150 burn-in iterations in each
-training fold. This is the Figure 6 protocol; the separate supplemental
-experiment and general fitting API retain their purpose-specific defaults.
+training fold. The general fitting API retains its purpose-specific defaults.
 
 RSF tuning uses at most 100 external controls, split approximately equally
 into training and validation sets. It selects `mtry` and minimum node size

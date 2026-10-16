@@ -10,10 +10,6 @@
 - Preserve the manuscript's simulation figure layouts and support explicit
   figure export from the R session.
 
-- Add the complete fresh S2-S4 reference results, frozen designs and random
-  states, selected-job replay, and original-style figure redraw. All target
-  laws use 100 independent super-population calculations.
-
 # mecCox 0.1.2
 
 - Provide the Figure 4/5 study configurations and fitting functions with

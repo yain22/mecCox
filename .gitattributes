@@ -14,10 +14,3 @@ LICENSE text eol=lf
 inst/reproduce/final_reference/** -text !eol
 inst/reproduce/final_plot_reference/** -text !eol
 reproduction-data/final_main_L5_20261013/** -text !eol
-
-# Preserve the audited supplemental reference, data, and callable adapters.
-inst/reproduce/final_supp_S2_S4_reference/** -text !eol
-reproduction-data/final_supp_S2_S4_20261015/** -text !eol
-inst/reproduce/supplement_S2_S4_helpers.R -text !eol
-inst/reproduce/run_supplement_S2_S4.R -text !eol
-inst/reproduce/redraw_supplement_S2_S4.R -text !eol
