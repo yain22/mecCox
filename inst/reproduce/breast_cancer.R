@@ -2,7 +2,8 @@
 # In RStudio, edit these settings and use Source. From a terminal:
 #   Rscript path/to/mecCox/inst/reproduce/breast_cancer.R --seed=20260427
 # Data are loaded from survival; no patient-data download or result export is used.
-# Numerical results can vary with seeds, learner settings, and software versions.
+# Run in a fresh R session. Original learner versions are installed separately
+# on first use to reproduce the supplementary tables.
 # If running pasted code, install/update mecCox from GitHub first, or set
 # reproduce_dir to the downloaded repository's inst/reproduce directory.
 reproduce_dir <- getOption("mecCox.reproduce_dir", NULL)
@@ -23,7 +24,8 @@ rsf_auto_tune <- TRUE
     script_files = character(), editor_path = .breast_editor_path(),
     working_directory = getwd(),
     installed_directory = system.file("reproduce", package = "mecCox")) {
-  helpers <- c("simulation_helpers.R", "breast_cancer_helpers.R")
+  helpers <- c("simulation_helpers.R", "breast_cancer_helpers.R",
+               "breast_cancer_environment.R")
   complete <- function(directory) {
     nzchar(directory) && all(file.exists(file.path(directory, helpers)))
   }
@@ -69,7 +71,7 @@ rsf_auto_tune <- TRUE
     "  remotes::install_github(\"yain22/mecCox\", upgrade = \"never\", force = TRUE)\n",
     "Then restart R and rerun the script with reproduce_dir <- NULL.\n",
     "Alternatively, download the complete repository and set reproduce_dir to its ",
-    "inst/reproduce folder, containing both helper files."), call. = FALSE)
+    "inst/reproduce folder, containing all three helper files."), call. = FALSE)
 }
 
 source_files <- vapply(sys.frames(), function(frame) {
@@ -79,7 +81,8 @@ source_files <- rev(source_files[nzchar(source_files)])
 script_option <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_files <- c(source_files, sub("^--file=", "", script_option))
 helper_directory <- .breast_helper_directory(reproduce_dir, script_files)
-for (helper in c("simulation_helpers.R", "breast_cancer_helpers.R")) {
+for (helper in c("simulation_helpers.R", "breast_cancer_helpers.R",
+                 "breast_cancer_environment.R")) {
   source(file.path(helper_directory, helper), local = TRUE)
 }
 
@@ -257,6 +260,8 @@ build_breast_cancer_report <- function(estimates, balance, settings) {
 }
 
 run_breast_cancer <- function(settings) {
+  study_environment <- .breast_use_study_environment()
+  on.exit(study_environment$restore(), add = TRUE)
   packages <- c("mecCox", "survival", "MASS", "brulee", "torch", "ranger",
                 "kableExtra", "htmltools", "rstudioapi")
   missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]

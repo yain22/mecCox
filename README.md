@@ -75,8 +75,9 @@ source(script)
 ```
 
 Replace `scenario1.R` with another filename from the table. Simulation run
-settings are near the top of each script. For the public case study's neural
-network, install the Torch runtime once with `torch::install_torch()`.
+settings are near the top of each script. Run `breast_cancer.R` in a fresh R
+session; it installs the original learner versions and CPU Torch runtime in
+a separate library on first use. Reproduction is verified with R 4.5.1 on Windows.
 
 The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 `survival`. Restricted SQUIRE/MSK-CHORD patient data are not included.
