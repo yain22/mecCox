@@ -8,6 +8,8 @@ if (!file.exists(helper_path)) {
 helper_path <- normalizePath(helper_path, mustWork = TRUE)
 simulation_helpers <- new.env(parent = baseenv())
 source(helper_path, local = simulation_helpers)
+source(file.path(dirname(helper_path), "final_driver_helpers.R"),
+       local = simulation_helpers)
 
 testthat::test_that("simulation arguments have useful defaults and reject mistakes", {
   parse_arguments <- simulation_helpers$parse_simulation_arguments
@@ -97,12 +99,14 @@ testthat::test_that("both scripts can be sourced from another working directory"
     writeLines(unlist(lapply(startup, deparse)), script_copy)
     file.copy(helper_path, file.path(scratch, "simulation_helpers.R"),
               overwrite = TRUE)
-    file.copy(file.path(reproduction_directory, "original_study_helpers.R"),
-              file.path(scratch, "original_study_helpers.R"), overwrite = TRUE)
-    dir.create(file.path(scratch, "study_reference"), showWarnings = FALSE)
-    file.copy(list.files(file.path(reproduction_directory, "study_reference"),
+    for (name in c("final_study_helpers.R", "final_driver_helpers.R")) {
+      file.copy(file.path(reproduction_directory, name), file.path(scratch, name),
+                overwrite = TRUE)
+    }
+    dir.create(file.path(scratch, "final_reference"), showWarnings = FALSE)
+    file.copy(list.files(file.path(reproduction_directory, "final_reference"),
                           full.names = TRUE),
-              file.path(scratch, "study_reference"), overwrite = TRUE)
+              file.path(scratch, "final_reference"), overwrite = TRUE)
 
     execution <- new.env(parent = baseenv())
     execution$commandArgs <- function(trailingOnly = FALSE) {
@@ -132,7 +136,7 @@ testthat::test_that("both scripts can be sourced from another working directory"
     # Reduced quick-run designs still use the count edited by the user.
     design_index <- which(vapply(expressions, function(expression) {
       is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
-        identical(expression[[2L]], as.name("study_engine"))
+        identical(expression[[2L]], as.name("final_reference"))
     }, logical(1)))
     first_function <- which(vapply(expressions, function(expression) {
       is.call(expression) && identical(expression[[1L]], as.name("<-")) &&
@@ -147,9 +151,18 @@ testthat::test_that("both scripts can be sourced from another working directory"
     testthat::expect_equal(execution$design$folds, 10L)
     testthat::expect_equal(execution$design$landmarks, 5L)
     testthat::expect_equal(execution$design$treated_sizes, 200L)
-    testthat::expect_equal(nrow(execution$study_streams[[1L]]$grid), 35L)
-    testthat::expect_equal(execution$study_streams[[1L]]$grid$job_id[
-      execution$study_streams[[1L]]$grid$n1 == 200L], seq(1L, 31L, by = 5L))
+    expected_root <- if (scenario == "scenario1") 2026101306L else 2026101304L
+    testthat::expect_identical(execution$design$seed, expected_root)
+    testthat::expect_identical(execution$design$nuisance_tuning_seed,
+                               execution$study_configs[[1L]]$auto_tune_seed)
+    grid <- execution$final_reference$bundle$grid
+    testthat::expect_equal(nrow(grid), 30000L)
+    figure <- if (scenario == "scenario1") "figure5" else "figure6"
+    setting <- if (scenario == "scenario1") "ratio2" else "none"
+    selected <- grid[grid$figure == figure & grid$setting == setting &
+                       grid$n1 == 200L & grid$rep_id <= 7L, ]
+    offset <- if (scenario == "scenario1") 0L else 15000L
+    testthat::expect_equal(selected$id, offset + seq(1L, 31L, by = 5L))
   }
 })
 
@@ -175,6 +188,9 @@ testthat::test_that("worker limits respect the request and number of replication
 })
 
 testthat::test_that("simulation plots preserve the active graphics device", {
+  testthat::skip_if_not_installed("ggplot2")
+  testthat::skip_if_not_installed("patchwork")
+  testthat::skip_if_not_installed("labeling")
   grDevices::pdf(NULL, width = 14, height = 12)
   on.exit(grDevices::dev.off(), add = TRUE)
   device <- grDevices::dev.cur()
@@ -185,6 +201,7 @@ testthat::test_that("simulation plots preserve the active graphics device", {
     coverage = c(0.8, 0.9, 0.95, 0.95),
     bias = c(0.1, 0.1, 0.1, 0.05), rmse = c(0.2, 0.2, 0.2, 0.1)
   )
+  first_summary <- rbind(first_summary, transform(first_summary, n1 = 250L))
   simulation_helpers$plot_scenario1_results(first_summary)
   testthat::expect_identical(grDevices::dev.cur(), device)
   testthat::expect_equal(graphics::par(names(old)), old)
@@ -192,11 +209,11 @@ testthat::test_that("simulation plots preserve the active graphics device", {
   settings <- data.frame(setting = c("None", "Mild", "Severe"))
   second_summary <- expand.grid(
     setting = settings$setting,
+    n1 = c(200L, 250L),
     method = c("Naive", "Robust sandwich", "Corrected sandwich",
                "MEC-Cox (BART/Cox)", "MEC-Cox (BART/RSF)"),
     stringsAsFactors = FALSE
   )
-  second_summary$n1 <- 200L
   second_summary$coverage <- 0.95
   second_summary$bias <- 0
   second_summary$rmse <- 0.1
@@ -331,6 +348,9 @@ testthat::test_that("simulation drivers retain results without creating files", 
     execution$study_configs <- list(`2` = list(theta_true = 0),
                                      none = list(theta_true = 0))
     execution$study_reference <- list()
+    execution$final_reference <- list(bundle = list(targets = data.frame(
+      figure = c("Figure5", "Figure6"), setting = c("ratio2", "none"),
+      numerical_target = 0)))
     execution$options <- list(quick_run = TRUE, cores = 1L, replications = 1L)
     execution$design <- list(replications = 1L, treated_sizes = 2L,
                               control_multipliers = 2L, control_multiplier = 4L)
@@ -569,6 +589,8 @@ scenario2_execution_fixture <- function(interrupt_at = NA_integer_) {
   }
   execution$study_configs <- list(none = list(theta_true = 0))
   execution$study_reference <- list()
+  execution$final_reference <- list(bundle = list(targets = data.frame(
+    figure = "Figure6", setting = "none", numerical_target = 0)))
   execution$options <- list(quick_run = TRUE, cores = 1L, replications = 4L)
   execution$design <- list(replications = 4L, treated_sizes = c(2L, 3L),
                             control_multiplier = 4L)
@@ -669,6 +691,9 @@ testthat::test_that("interruption retains completed cells and the current partia
 })
 
 testthat::test_that("partial Scenario 2 plots omit unstarted settings", {
+  testthat::skip_if_not_installed("ggplot2")
+  testthat::skip_if_not_installed("patchwork")
+  testthat::skip_if_not_installed("labeling")
   execution <- scenario2_execution_fixture(interrupt_at = 2L)
   invisible(capture.output(answer <- suppressMessages(execution$run_scenario2(
     execution$design, execution$settings, execution$options

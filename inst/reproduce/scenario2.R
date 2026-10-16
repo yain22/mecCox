@@ -1,4 +1,4 @@
-# Run the second simulation using the bundled main-paper study engine.
+# Run the second simulation using the frozen final-manuscript study bundle.
 # Run after installing mecCox, dbarts, and ranger:
 #   Rscript path/to/mecCox/inst/reproduce/scenario2.R
 # The default is up to 20 workers; --cores=1 runs sequentially.
@@ -32,16 +32,17 @@ helper_candidates <- unique(helper_candidates[
   nzchar(helper_candidates) & file.exists(helper_candidates)
 ])
 helper_candidates <- helper_candidates[vapply(dirname(helper_candidates), function(path) {
-  file.exists(file.path(path, "original_study_helpers.R")) &&
-    dir.exists(file.path(path, "study_reference"))
+  file.exists(file.path(path, "final_study_helpers.R")) &&
+    file.exists(file.path(path, "final_driver_helpers.R")) &&
+    dir.exists(file.path(path, "final_reference"))
 }, logical(1))]
 if (!length(helper_candidates)) {
   stop("Cannot find the complete simulation helpers. Install the current mecCox ",
-       "package, or keep simulation_helpers.R, original_study_helpers.R, and ",
-       "study_reference beside this script.", call. = FALSE)
+       "package, or keep simulation_helpers.R, final_driver_helpers.R, final_study_helpers.R, and ",
+       "final_reference beside this script.", call. = FALSE)
 }
 source(helper_candidates[1L], local = TRUE)
-source(file.path(dirname(helper_candidates[1L]), "original_study_helpers.R"), local = TRUE)
+source(file.path(dirname(helper_candidates[1L]), "final_driver_helpers.R"), local = TRUE)
 if (!exists("build_simulation_report", mode = "function", inherits = FALSE)) {
   stop("Update mecCox or download the complete current reproduce folder.", call. = FALSE)
 }
@@ -55,9 +56,10 @@ arguments <- if (interactive() || length(source_files)) {
 options <- parse_simulation_arguments(
   arguments, quick_run = quick_run, cores = cores, replications = replications
 )
+check_final_driver_replications(options$replications)
 check_simulation_display_packages()
 
-required_packages <- c("mecCox", "survival", "MASS", "rngtools", "dbarts", "ranger")
+required_packages <- c("mecCox", "survival", "MASS", "dbarts", "ranger")
 missing_packages <- required_packages[!vapply(
   required_packages, requireNamespace, logical(1), quietly = TRUE
 )]
@@ -66,22 +68,19 @@ if (length(missing_packages)) {
        paste(missing_packages, collapse = ", "), call. = FALSE)
 }
 
-# Bundled configurations supply the main-paper study targets and fitting settings.
-study_engine <- get_original_study_engine("scenario2")
-study_reference <- original_study_metadata("scenario2")
+# Select from the complete frozen grid; quick subsets never regenerate streams.
+final_reference <- load_final_driver_reference(dirname(helper_candidates[1L]))
+study_reference <- final_reference$bundle$provenance
 study_keys <- c("none", "mild", "severe")
 study_configs <- stats::setNames(lapply(study_keys, function(key) {
-  get_original_study_config("scenario2", key)
+  final_reference$bundle$configs[[paste0("figure6_", key)]]
 }), study_keys)
-# Create the complete study grid before selecting quick-check jobs.
-# Its order is sample size first within each replicate, as in expand.grid(ss, rep_id).
-study_streams <- lapply(study_configs, original_study_streams,
-                        replicates = options$replications)
 study_config <- study_configs[[1L]]
 design <- list(
-  seed = study_config$seed,
+  seed = study_reference$root_seeds[["figure6"]],
+  nuisance_tuning_seed = study_config$auto_tune_seed,
   replications = options$replications,
-  treated_sizes = study_config$sample_size_n1,
+  treated_sizes = study_config$sample_size_grid$n1,
   control_multiplier = study_config$n0_over_n1,
   covariate_count = study_config$p,
   folds = study_config$Kfold_mec,
@@ -90,21 +89,19 @@ design <- list(
   weibull_shape = study_config$eta_shape,
   censoring_rate = study_config$censor_rate,
   conditional_log_hr = study_config$beta_cond,
-  engine = "Bundled main-paper study engine",
-  engine_source = study_reference$source_basename,
-  engine_source_sha256 = study_reference$source_sha256,
-  engine_snapshot_sha256 = study_reference$engine_sha256
+  engine = "Frozen final-manuscript study bundle",
+  engine_manifest_md5 = study_reference$manifest_md5
 )
 settings <- data.frame(
   setting_id = seq_along(study_keys), setting_key = study_keys,
-  setting = c("No nonlinearity", "Mild nonlinearity", "Severe nonlinearity"),
+  setting = c("none", "mild", "severe"),
   kappa_pi = vapply(study_configs, function(config) config$ps_nonlinearity, numeric(1)),
   kappa_m = vapply(study_configs, function(config) config$or_nonlinearity, numeric(1)),
   stringsAsFactors = FALSE, row.names = NULL
 )
 
 if (options$quick_run) {
-  design$treated_sizes <- study_config$sample_size_n1[1L]
+  design$treated_sizes <- study_config$sample_size_grid$n1[1L]
 
   message("Quick check: fewer datasets and sample-size cells; study learner ",
           "settings, folds, landmarks, and reference targets are retained.")
@@ -132,34 +129,12 @@ make_result <- function(setting, treated_count, replicate, method, target,
 }
 
 run_replication <- function(setting, treated_count, replicate, target, design) {
-  key <- as.character(setting$setting_key)
-  plan <- study_streams[[key]]
-  job <- which(plan$grid$n1 == treated_count & plan$grid$rep_id == replicate)
-  if (length(job) != 1L) stop("The requested run is not in the study grid.")
-  raw <- fit_original_study_rep(study_engine, study_configs[[key]],
-                                n1 = treated_count, rep_id = replicate,
-                                rng_stream = plan$streams[[job]])
-  methods <- rep(NA_character_, nrow(raw))
-  methods[raw$Method == "ATT-IPW Cox: Naive model-based"] <- "Naive"
-  methods[raw$Method == "ATT-IPW Cox: Lin-Wei"] <- "Robust sandwich"
-  methods[raw$Method == "ATT-IPW Cox: Shu"] <- "Corrected sandwich"
-  methods[grepl("^MEC-Cox:", raw$Method) & grepl("OR=cox", raw$Method, fixed = TRUE)] <- "MEC-Cox (BART/Cox)"
-  methods[grepl("^MEC-Cox:", raw$Method) & grepl("OR=rsf", raw$Method, fixed = TRUE)] <- "MEC-Cox (BART/RSF)"
-  keep <- !is.na(methods)
-  raw <- raw[keep, , drop = FALSE]
-  methods <- methods[keep]
-  if (!nrow(raw)) stop("The study engine returned no requested method rows.")
-  answer <- make_result(setting, treated_count, raw$rep, methods,
+  fitted <- final_driver_run(final_reference, "figure6", as.character(setting$setting_key),
+                             treated_count, replicate)
+  raw <- fitted$raw
+  answer <- make_result(setting, treated_count, raw$rep, fitted$methods,
                         raw$theta_true, design, raw$Estimate, raw$SE, raw$Error)
-  # Keep the study engine's confidence intervals and fit diagnostics.
-  answer$ci_lower <- raw$CI_L
-  answer$ci_upper <- raw$CI_U
-  answer$original_method <- raw$Method
-  answer$original_rng_job <- plan$grid$job_id[job]
-  for (name in c("ESS", "Rel_ESS", "W_CV", "W_Min", "W_Max", "Cal_Grad", "Cal_Converged")) {
-    answer[[name]] <- raw[[name]]
-  }
-  answer
+  final_driver_add_diagnostics(answer, fitted)
 }
 
 summarize_scenario2_results <- function(results, settings) {
@@ -176,9 +151,11 @@ summarize_scenario2_results <- function(results, settings) {
     result$replications <- nrow(group)
     result$successful <- nrow(successful)
     result$failed <- nrow(group) - nrow(successful)
-    result$coverage <- if (length(error)) mean(
-      successful$target >= successful$ci_lower & successful$target <= successful$ci_upper
-    ) else NA_real_
+    intervals <- final_driver_coverage(successful)
+    result$coverage <- intervals$coverage
+    result$coverage_numerator <- intervals$numerator
+    result$coverage_denominator <- intervals$denominator
+    result$valid_and_covers_per_attempt <- intervals$numerator / nrow(group)
     result$bias <- if (length(error)) mean(error) else NA_real_
     result$rmse <- if (length(error)) sqrt(mean(error^2)) else NA_real_
     result
@@ -198,13 +175,14 @@ run_scenario2 <- function(design, settings, options) {
   planned_replications <- planned_cells * design$replications
   state <- new.env(parent = emptyenv())
   state$rows <- vector("list", planned_replications)
+  state$diagnostics <- vector("list", planned_replications)
   state$completed <- 0L
   state$status <- "completed"
   state$condition <- NULL
   cluster <- NULL
   on.exit(stop_simulation_cluster(cluster), add = TRUE)
-  export_names <- c("make_result", "run_replication", "fit_original_study_rep",
-                    "study_engine", "study_configs", "study_streams")
+  export_names <- c("make_result", "run_replication", "final_reference",
+                    final_driver_export_names())
   execution <- list(
     requested_cores = options$cores,
     workers = worker_count,
@@ -219,8 +197,9 @@ run_scenario2 <- function(design, settings, options) {
     design$replications, planned_replications
   ))
   targets <- settings
-  targets$target <- vapply(study_configs[as.character(settings$setting_key)],
-                            function(config) config$theta_true, numeric(1))
+  targets$target <- vapply(settings$setting_key, function(key) {
+    final_driver_target(final_reference, "figure6", key)$numerical_target
+  }, numeric(1))
   tryCatch({
     cluster <- start_simulation_cluster(worker_count, export_names,
                                         envir = environment(run_replication))
@@ -246,6 +225,8 @@ run_scenario2 <- function(design, settings, options) {
           # output identical. Only this short state update defers interrupts.
           suspendInterrupts({
             task <- (cell_index - 1L) * design$replications + replicate
+            state$diagnostics[task] <- list(attr(value, "final_diagnostics", exact = TRUE))
+            attr(value, "final_diagnostics") <- NULL
             state$rows[task] <- list(value)
             state$completed <- state$completed + 1L
             cell_completed <<- cell_completed + 1L
@@ -292,10 +273,10 @@ run_scenario2 <- function(design, settings, options) {
                            design$treated_sizes[1L], 1L, "", NA_real_, design)[0, ]
     summary <- results[, c("setting", "kappa_pi", "kappa_m", "n1", "n0",
                            "method"), drop = FALSE]
-    for (name in c("replications", "successful", "failed")) {
+    for (name in c("replications", "successful", "failed", "coverage_numerator", "coverage_denominator")) {
       summary[[name]] <- integer()
     }
-    for (name in c("coverage", "bias", "rmse")) summary[[name]] <- numeric()
+    for (name in c("coverage", "bias", "rmse", "valid_and_covers_per_attempt")) summary[[name]] <- numeric()
   }
   execution$status <- state$status
   execution$completed_replications <- state$completed
@@ -306,13 +287,15 @@ run_scenario2 <- function(design, settings, options) {
                    quick_run = options$quick_run, targets = targets,
                    study_engine = study_reference,
                    saved_configurations = study_configs,
-                   rng_order = "Sample size varies fastest within each replicate",
+                   rng_order = "Frozen global job IDs; sample size varies fastest within replicate",
+                   target_policy = final_reference$bundle$targets,
                    execution = execution, session = utils::sessionInfo())
   message(sprintf("Scenario 2 %s: %d/%d completed datasets retained in memory.",
                   state$status, state$completed, planned_replications))
   if (state$status == "failed") message("Execution error: ", state$condition)
   invisible(list(status = state$status, replications = results, summary = summary,
-                 targets = targets, metadata = metadata))
+                 targets = targets, metadata = metadata,
+                 diagnostics = Filter(Negate(is.null), state$diagnostics)))
 }
 
 scenario2_results <- run_scenario2(design, settings, options)

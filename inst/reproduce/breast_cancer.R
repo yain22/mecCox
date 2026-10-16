@@ -222,8 +222,8 @@ build_breast_cancer_report <- function(estimates, balance, settings) {
                               bootstrap_options = c("striped", "hover", "condensed"))
   }
   tables <- list(
-    estimates = style(estimates_display, "Table S2. Marginal hazard-ratio estimates"),
-    balance = style(balance_display, "Table S3. Covariate balance and weight diagnostics")
+    estimates = style(estimates_display, "Table S3. Marginal hazard-ratio estimates"),
+    balance = style(balance_display, "Table S4. Covariate balance and weight diagnostics")
   )
   report <- htmltools::browsable(htmltools::tagList(
     htmltools::tags$head(htmltools::tags$title("Public breast-cancer case study"),

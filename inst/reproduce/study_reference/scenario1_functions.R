@@ -1,8 +1,7 @@
 # Manuscript simulation functions: study implementation.
 # Function definitions from Sim_MEC_Cox_landmark_feature.R.
 # Sourcing this file defines functions only; see the adjacent adapters.
-# BART uses the study conversion of latent means with its range heuristic
-# and binaryOffset calculation. The calculation is described in README.md.
+# BART propensity scores average the posterior probability draws.
 # See README.md. These functions do not replace mecCox::fit_mec_cox.
 
 expit <- function(x) {
@@ -1297,22 +1296,11 @@ estimate_ps_ml <- function(data,
       ehat <- as.numeric(fit$prob.test.mean)
     } else if (!is.null(fit$prob.test)) {
       ehat <- as.numeric(colMeans(fit$prob.test))
-    } else if (!is.null(fit$yhat.test.mean)) {
-      raw <- as.numeric(fit$yhat.test.mean)
-
-      if (all(raw >= -0.05 & raw <= 1.05, na.rm = TRUE)) {
-        ehat <- raw
-      } else {
-        ehat <- pnorm(raw + binary_offset)
-      }
-    } else if (!is.null(fit$yhat.test)) {
-      raw <- as.numeric(colMeans(fit$yhat.test))
-
-      if (all(raw >= -0.05 & raw <= 1.05, na.rm = TRUE)) {
-        ehat <- raw
-      } else {
-        ehat <- pnorm(raw + binary_offset)
-      }
+    } else if (!is.null(fit[["yhat.test"]])) {
+      # dbarts includes binaryOffset in every latent draw.
+      ehat <- as.numeric(colMeans(pnorm(fit[["yhat.test"]])))
+    } else if (!is.null(fit[["yhat.test.mean"]])) {
+      ehat <- pnorm(as.numeric(fit[["yhat.test.mean"]]))
     } else {
       stop("Could not extract BART predicted probabilities.")
     }

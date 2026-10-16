@@ -1,3 +1,19 @@
+# mecCox 0.1.4
+
+- Remove the duplicate probit offset from BART propensity calculations.
+  The fitting API averages posterior probabilities; the final manuscript
+  studies retain their normal-CDF-of-latent-means calculation.
+- Bundle the prospective Figure 5/6 configurations and saved random states,
+  with five landmarks and severe nonlinearity `(1.5, 4)` in Figure 6.
+- Evaluate the KL calibration cross-derivative analytically in the final
+  study engines, preserving the remaining estimation and variance formulas.
+- Preserve the manuscript's simulation figure layouts and support explicit
+  figure export from the R session.
+
+- Add the complete fresh S2-S4 reference results, frozen designs and random
+  states, selected-job replay, and original-style figure redraw. All target
+  laws use 100 independent super-population calculations.
+
 # mecCox 0.1.2
 
 - Provide the Figure 4/5 study configurations and fitting functions with

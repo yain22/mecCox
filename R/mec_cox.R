@@ -274,14 +274,13 @@
     probabilities <- as.numeric(fit$prob.test.mean)
   } else if (!is.null(fit$prob.test)) {
     probabilities <- as.numeric(colMeans(fit$prob.test))
-  } else if (!is.null(fit$yhat.test)) {
+  } else if (!is.null(fit[["yhat.test"]])) {
+    # dbarts includes binaryOffset in every latent draw.
     probabilities <- as.numeric(colMeans(
-      stats::pnorm(fit$yhat.test + binary_offset)
+      stats::pnorm(fit[["yhat.test"]])
     ))
-  } else if (!is.null(fit$yhat.test.mean)) {
-    probabilities <- stats::pnorm(
-      as.numeric(fit$yhat.test.mean) + binary_offset
-    )
+  } else if (!is.null(fit[["yhat.test.mean"]])) {
+    probabilities <- stats::pnorm(as.numeric(fit[["yhat.test.mean"]]))
   } else {
     stop("BART did not return validation-set source probabilities.",
          call. = FALSE)

@@ -1,4 +1,5 @@
-# Adapters for the main-paper simulation studies.
+# Compatibility adapters for pre-final study snapshots.
+# Current manuscript reproduction uses final_study_helpers.R instead.
 # Source this file; it does not load data or launch simulation jobs.
 # Study functions are isolated from the package API and the caller's globals.
 

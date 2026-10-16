@@ -312,128 +312,149 @@ simulation_graphics_available <- function() {
   FALSE
 }
 
-# Draw on the active R graphics device; never open a file graphics device.
+# Publication plotting adapters for the main-paper simulations.
+# The plot design follows the original revised publication scripts.
+check_publication_plot_packages <- function() {
+  packages <- c("ggplot2", "patchwork", "labeling")
+  missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+  if (length(missing)) {
+    stop("Install the plotting packages: ", paste(missing, collapse = ", "),
+         call. = FALSE)
+  }
+}
+
+build_publication_simulation_figure <- function(data, method_order, colors,
+                                                shapes, line_types,
+                                                legend_rows = 1L) {
+  check_publication_plot_packages()
+  theme_pub <- ggplot2::theme_bw(base_size = 14) +
+    ggplot2::theme(
+      legend.position = "bottom",
+      legend.title = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 11),
+      legend.key.width = grid::unit(1.5, "cm"),
+      strip.text = ggplot2::element_text(size = 13, face = "bold"),
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.text = ggplot2::element_text(size = 11),
+      axis.title = ggplot2::element_text(size = 12),
+      plot.title = ggplot2::element_text(size = 13, face = "bold", hjust = 0)
+    )
+  data$Method_Label <- factor(data$Method_Label, levels = method_order)
+  data <- data[!is.na(data$Method_Label), , drop = FALSE]
+  data$Method_Label <- droplevels(data$Method_Label)
+  colors <- stats::setNames(colors, method_order)
+  shapes <- stats::setNames(shapes, method_order)
+  line_types <- stats::setNames(line_types, method_order)
+  make_panel <- function(data, metric, ylab, title, hline = NULL) {
+    p <- ggplot2::ggplot(data, ggplot2::aes(
+      x = n1, y = .data[[metric]], color = Method_Label,
+      shape = Method_Label, linetype = Method_Label
+    )) +
+      ggplot2::geom_line(linewidth = 0.6) +
+      ggplot2::geom_point(size = 2.2) +
+      ggplot2::scale_color_manual(values = colors) +
+      ggplot2::scale_shape_manual(values = shapes) +
+      ggplot2::scale_linetype_manual(values = line_types) +
+      ggplot2::labs(x = expression(n[1]), y = ylab, title = title) + theme_pub
+    if (!is.null(hline)) {
+      p <- p + ggplot2::geom_hline(
+        yintercept = hline, linetype = "dashed", color = "gray30", linewidth = 0.5
+      ) + ggplot2::scale_y_continuous(breaks = function(lims) {
+        b <- labeling::extended(lims[1], lims[2], m = 5)
+        sort(unique(c(b, hline)))
+      })
+    }
+    p
+  }
+  settings <- levels(data$.setting)
+  panels <- vector("list", length(settings) * 3L)
+  for (i in seq_along(settings)) {
+    d <- data[data$.setting == settings[i], , drop = FALSE]
+    first <- (i - 1L) * 3L + 1L
+    panels[[first]] <- make_panel(
+      d, "coverage", "Coverage",
+      paste0("(", letters[first], ") Coverage: ", settings[i]), 0.95
+    )
+    panels[[first + 1L]] <- make_panel(
+      d, "bias", "Bias",
+      paste0("(", letters[first + 1L], ") Bias: ", settings[i]), 0
+    )
+    panels[[first + 2L]] <- make_panel(
+      d, "rmse", "RMSE",
+      paste0("(", letters[first + 2L], ") RMSE: ", settings[i])
+    )
+  }
+  rows <- lapply(seq_along(settings), function(i) {
+    first <- (i - 1L) * 3L + 1L
+    panels[[first]] + panels[[first + 1L]] + panels[[first + 2L]]
+  })
+  figure <- Reduce(`/`, rows) + patchwork::plot_layout(guides = "collect") &
+    ggplot2::theme(legend.position = "bottom", legend.box = "horizontal")
+  if (legend_rows > 1L) {
+    figure <- figure & ggplot2::guides(
+      color = ggplot2::guide_legend(nrow = legend_rows, byrow = TRUE),
+      shape = ggplot2::guide_legend(nrow = legend_rows, byrow = TRUE),
+      linetype = ggplot2::guide_legend(nrow = legend_rows, byrow = TRUE)
+    )
+  }
+  figure
+}
+
+build_scenario1_figure <- function(summary) {
+  if (!nrow(summary)) return(NULL)
+  methods <- c("Naive", "Robust sandwich", "Corrected sandwich",
+               "MEC-Cox (KL-GLM(PS)-Cox(OR))")
+  labels <- stats::setNames(methods, c("Naive", "Robust sandwich",
+                                      "Corrected sandwich", "MEC-Cox"))
+  data <- summary
+  data$Method_Label <- unname(labels[as.character(data$method)])
+  ratio_order <- unique(as.character(data$ratio))
+  data$.setting <- factor(paste0("n1:n0 = ", data$ratio),
+                          levels = paste0("n1:n0 = ", ratio_order))
+  build_publication_simulation_figure(
+    data, methods, c("gray25", "#0072B2", "#009E73", "#D55E00"),
+    c(4, 1, 2, 16), c("dotted", "dashed", "longdash", "solid")
+  )
+}
+
+build_scenario2_figure <- function(summary, settings) {
+  settings <- settings[settings$setting %in% summary$setting, , drop = FALSE]
+  if (!nrow(settings) || !nrow(summary)) return(NULL)
+  methods <- c("Naive", "Robust sandwich", "Corrected sandwich",
+               "MEC-Cox (KL-BART(PS)-Cox(OR))", "MEC-Cox (KL-BART(PS)-RSF(OR))")
+  labels <- stats::setNames(methods, c("Naive", "Robust sandwich",
+                                      "Corrected sandwich", "MEC-Cox (BART/Cox)",
+                                      "MEC-Cox (BART/RSF)"))
+  data <- summary
+  data$Method_Label <- unname(labels[as.character(data$method)])
+  data$.setting <- factor(paste0("Nonlinearity: ", tolower(data$setting)),
+                          levels = paste0("Nonlinearity: ", tolower(settings$setting)))
+  build_publication_simulation_figure(
+    data, methods, c("gray25", "#0072B2", "#009E73", "#D55E00", "blue"),
+    c(4, 1, 2, 16, 17), c("dotted", "dashed", "longdash", "solid", "solid"),
+    legend_rows = 2L
+  )
+}
+
+# Draw only on an already available graphics device; explicit exports are below.
 plot_scenario1_results <- function(summary) {
   if (!simulation_graphics_available()) return(invisible(FALSE))
-  methods <- c("Naive", "Robust sandwich", "Corrected sandwich", "MEC-Cox")
-  colors <- c("gray25", "#0072B2", "#009E73", "#D55E00")
-  line_types <- c(3L, 2L, 4L, 1L)
-  symbols <- c(4L, 1L, 2L, 16L)
-  metrics <- c(coverage = "Coverage", bias = "Bias", rmse = "RMSE")
-  ratios <- unique(summary$ratio)
-
-  old <- graphics::par(no.readonly = TRUE)
-  panel_count <- 3L * length(ratios)
-  panel_layout <- matrix(seq_len(panel_count), ncol = 3L, byrow = TRUE)
-  panel_layout <- rbind(panel_layout, rep(panel_count + 1L, 3L))
-  graphics::layout(panel_layout,
-                   heights = c(rep(1, length(ratios)), 0.20))
-  graphics::par(mar = c(4, 4.2, 3, 1),
-                       oma = c(0, 0, 1.5, 0), las = 1)
-  on.exit({
-    graphics::par(old)
-  }, add = TRUE)
-  device_size <- grDevices::dev.size("in")
-  if (device_size[1L] < 5 || device_size[2L] < 4) {
-    # Keep all panels visible in a small RStudio plot pane.
-    plot_scale <- min(1, device_size[1L] / 5, device_size[2L] / 4)
-    graphics::par(mar = c(3, 3.2, 2.2, 0.6), oma = c(0, 0, 0.8, 0),
-                  mgp = c(1.8, 0.55, 0),
-                  cex = graphics::par("cex") * plot_scale)
-  }
-  panel_index <- 0L
-
-  for (ratio in ratios) {
-    for (metric in names(metrics)) {
-      panel_index <- panel_index + 1L
-      panel_data <- summary[summary$ratio == ratio, , drop = FALSE]
-      observed <- panel_data[[metric]][is.finite(panel_data[[metric]])]
-      limits <- if (length(observed)) range(observed) else c(0, 1)
-      if (diff(limits) < 1e-8) limits <- limits + c(-0.01, 0.01)
-      if (metric == "coverage") limits <- range(c(limits, 0.95))
-      if (metric == "bias") limits <- range(c(limits, 0))
-      graphics::plot(range(panel_data$n1), limits, type = "n",
-                     xlab = expression(n[1]), ylab = metrics[metric],
-                     main = sprintf("(%s) %s, n1:n0 = %s",
-                                    letters[panel_index], metrics[metric], ratio))
-      if (metric == "coverage") graphics::abline(h = 0.95, col = "gray70")
-      if (metric == "bias") graphics::abline(h = 0, col = "gray70")
-      for (index in seq_along(methods)) {
-        method_data <- panel_data[panel_data$method == methods[index], ]
-        method_data <- method_data[order(method_data$n1), ]
-        graphics::lines(method_data$n1, method_data[[metric]],
-                        col = colors[index], lty = line_types[index], lwd = 1.5)
-        graphics::points(method_data$n1, method_data[[metric]],
-                         col = colors[index], pch = symbols[index])
-      }
-    }
-  }
-  graphics::par(mar = c(0, 0, 0, 0))
-  graphics::plot.new()
-  graphics::legend("center", legend = methods,
-                   col = colors, lty = line_types, pch = symbols,
-                   horiz = TRUE, bty = "n", cex = 0.85)
+  figure <- build_scenario1_figure(summary)
+  if (is.null(figure)) return(invisible(FALSE))
+  print(figure)
+  invisible(figure)
 }
 
 plot_scenario2_results <- function(summary, settings) {
-  settings <- settings[settings$setting %in% summary$setting, , drop = FALSE]
-  if (!nrow(settings)) return(invisible(FALSE))
   if (!simulation_graphics_available()) return(invisible(FALSE))
-  methods <- c("Naive", "Robust sandwich", "Corrected sandwich",
-               "MEC-Cox (BART/Cox)", "MEC-Cox (BART/RSF)")
-  colors <- c("gray25", "#0072B2", "#009E73", "#D55E00", "#CC79A7")
-  line_types <- c(3L, 2L, 4L, 1L, 5L)
-  symbols <- c(4L, 1L, 2L, 16L, 17L)
-  metrics <- c(coverage = "Coverage", bias = "Bias", rmse = "RMSE")
+  figure <- build_scenario2_figure(summary, settings)
+  if (is.null(figure)) return(invisible(FALSE))
+  print(figure)
+  invisible(figure)
+}
 
-  old <- graphics::par(no.readonly = TRUE)
-  panel_layout <- matrix(seq_len(9L), ncol = 3L, byrow = TRUE)
-  panel_layout <- rbind(panel_layout, rep(10L, 3L))
-  graphics::layout(panel_layout, heights = c(1, 1, 1, 0.25))
-  graphics::par(mar = c(4, 4.2, 3, 1),
-                       oma = c(0, 0, 1.5, 0), las = 1)
-  on.exit({
-    graphics::par(old)
-  }, add = TRUE)
-  device_size <- grDevices::dev.size("in")
-  if (device_size[1L] < 5 || device_size[2L] < 4) {
-    # Keep all panels visible in a small RStudio plot pane.
-    plot_scale <- min(1, device_size[1L] / 5, device_size[2L] / 4)
-    graphics::par(mar = c(3, 3.2, 2.2, 0.6), oma = c(0, 0, 0.8, 0),
-                  mgp = c(1.8, 0.55, 0),
-                  cex = graphics::par("cex") * plot_scale)
-  }
-  panel_index <- 0L
-
-  for (setting_name in settings$setting) {
-    for (metric in names(metrics)) {
-      panel_index <- panel_index + 1L
-      panel_data <- summary[summary$setting == setting_name, , drop = FALSE]
-      observed <- panel_data[[metric]][is.finite(panel_data[[metric]])]
-      limits <- if (length(observed)) range(observed) else c(0, 1)
-      if (diff(limits) < 1e-8) limits <- limits + c(-0.01, 0.01)
-      if (metric == "coverage") limits <- range(c(limits, 0.95))
-      if (metric == "bias") limits <- range(c(limits, 0))
-      graphics::plot(range(panel_data$n1), limits, type = "n",
-                     xlab = expression(n[1]), ylab = metrics[metric],
-                     main = sprintf("(%s) %s: %s",
-                                    letters[panel_index], setting_name,
-                                    metrics[metric]))
-      if (metric == "coverage") graphics::abline(h = 0.95, col = "gray70")
-      if (metric == "bias") graphics::abline(h = 0, col = "gray70")
-      for (index in seq_along(methods)) {
-        method_data <- panel_data[panel_data$method == methods[index], ]
-        method_data <- method_data[order(method_data$n1), ]
-        graphics::lines(method_data$n1, method_data[[metric]],
-                        col = colors[index], lty = line_types[index], lwd = 1.5)
-        graphics::points(method_data$n1, method_data[[metric]],
-                         col = colors[index], pch = symbols[index])
-      }
-    }
-  }
-  graphics::par(mar = c(0, 0, 0, 0))
-  graphics::plot.new()
-  graphics::legend("center", legend = methods,
-                   col = colors, lty = line_types, pch = symbols,
-                   horiz = TRUE, bty = "n", cex = 0.8)
+save_simulation_figure <- function(figure, filename) {
+  check_publication_plot_packages()
+  ggplot2::ggsave(filename, figure, width = 12, height = 9, units = "in", dpi = 300)
+  invisible(filename)
 }

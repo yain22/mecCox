@@ -1,3 +1,5 @@
+# Historical compatibility fixtures only. Current manuscript inputs and engines
+# are tested in test-final-study-reference.R and test-final-study-drivers.R.
 study_helper_path <- testthat::test_path("..", "..", "inst", "reproduce",
                                         "original_study_helpers.R")
 if (!file.exists(study_helper_path)) {
@@ -80,7 +82,7 @@ test_that("study streams match saved doRNG state and preserve caller RNG", {
   expect_error(study_helpers$original_study_streams(config, 0), "positive integer")
 })
 
-test_that("a study job matches saved estimates and survives worker serialization", {
+test_that("a study job matches reference estimates and survives worker serialization", {
   skip_if_not_installed("rngtools")
   skip_if_not_installed("dbarts")
   skip_if_not_installed("ranger")
@@ -101,7 +103,8 @@ test_that("a study job matches saved estimates and survives worker serialization
   expect_length(result$Estimate, 5L)
   expect_true(all(is.finite(result$Estimate)))
   expect_true(all(is.finite(result$SE) & result$SE > 0))
-  # The numerical fixture applies to its recorded software environment.
+  # The fixture uses posterior probability means for BART and retains the
+  # unchanged ATT estimates. It applies to its recorded software environment.
   # Other supported versions are checked for successful, finite fits above.
   fixture_environment <- .Platform$OS.type == "windows" &&
     getRversion() == "4.5.1" &&
@@ -110,9 +113,9 @@ test_that("a study job matches saved estimates and survives worker serialization
     utils::packageVersion("ranger") == "0.17.0"
   if (fixture_environment) {
     expect_equal(result$Estimate, c(rep(-0.34043567356217552, 3L),
-      -0.37360440031192166, -0.39550247440702435), tolerance = 1e-8)
+      -0.361671079640081, -0.380273270702295), tolerance = 1e-8)
     expect_equal(result$SE, c(0.104636188098269953, 0.101167020439408645,
-      0.074733454715128364, 0.066590198257541006, 0.075857650323297041),
+      0.074733454715128364, 0.0651252981004719, 0.074981623978636),
       tolerance = 1e-8)
   }
   expect_error(study_helpers$fit_original_study_rep(

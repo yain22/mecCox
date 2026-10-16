@@ -82,7 +82,7 @@ two simulation experiments, and one public-data case study:
 | Toy example | [toy_example.R](inst/reproduce/toy_example.R) | Three-panel figures, empirical SDs, and weight diagnostics for both designs |
 | Simulation 1: linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
 | Simulation 2: increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
-| Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S2 and S3 |
+| Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S3 and S4 |
 
 The breast-cancer example uses the public `gbsg` and `rotterdam` datasets
 distributed with the R package `survival`. These data are available to anyone
@@ -123,6 +123,11 @@ describe the designs, settings, and result objects.
 
 ### Simulation experiments
 
+To redraw the completed Figures 5 and 6 without refitting, use the [completed
+simulation data](reproduction-data/final_main_L5_20261013) and the
+[figure-redraw instructions](inst/reproduce/FINAL_FIGURE_WORKFLOW.txt). The
+compact data retain all attempted model rows, including failed fits.
+
 The [Scenario 1 script](inst/reproduce/scenario1.R) runs the paper's
 linear source-selection and outcome experiment. It compares the three
 ATT-IPW Cox standard errors with GLM/Cox MEC-Cox for each treated sample size
@@ -135,17 +140,23 @@ coverage, bias, and RMSE, and a nine-panel figure.
 The [Scenario 2 script](inst/reproduce/scenario2.R) evaluates the three
 nonlinearity settings with 10 covariates, a fixed external-control ratio of
 `1:4`, and the same treated sample sizes and number of runs. It compares
-the ATT-IPW methods with BART/Cox and BART/RSF MEC-Cox. Install its optional
+the ATT-IPW methods with BART/Cox and BART/RSF MEC-Cox, using five landmarks
+and nonlinearity multipliers `(0, 0)`, `(1, 2)`, and `(1.5, 4)`.
+Both scripts use the frozen configurations, targets and exact saved random
+states in [final_reference](inst/reproduce/final_reference).
+Install Scenario 2's optional
 learners before running this script:
 
 ```r
 install.packages(c("dbarts", "ranger"))
 ```
 
-Both scripts use HTML tables from `kableExtra` for their results display:
+Both scripts use HTML tables for their results display, `digest` to verify
+the saved study bundle, and `ggplot2`, `patchwork`, and `labeling` for figures:
 
 ```r
-install.packages(c("kableExtra", "htmltools", "rstudioapi"))
+install.packages(c("kableExtra", "htmltools", "rstudioapi", "digest"))
+install.packages(c("ggplot2", "patchwork", "labeling"))
 ```
 
 Run either script with RStudio's **Source** button, or from the R console:
@@ -164,10 +175,11 @@ cores <- 20L
 replications <- 1000L
 ```
 
-Edit `replications` to choose the number of Monte Carlo runs per
-design cell, and edit `cores` to choose the maximum number of workers.
-**The scripts display results and keep them in memory; they do not export
-result files.** In RStudio, a formatted HTML report opens in the **Viewer**
+Edit `replications` to select 1 through 1,000 saved runs per design cell,
+and edit `cores` to choose the maximum number of workers. Smaller runs select
+from the unchanged full grid; they do not generate a new sequence of states.
+**The scripts display results and keep them in memory; no result files are
+exported by default.** In RStudio, a formatted HTML report opens in the **Viewer**
 pane, with the complete simulation summary, reference targets, and run
 settings. The figure appears on the active graphics device, normally the
 **Plots** pane. The results also remain in the R session:
@@ -180,6 +192,16 @@ scenario1_tables        # named list of formatted HTML tables
 scenario1_report        # HTML report shown in the Viewer
 ```
 
+For an explicit PDF export at the manuscript's 12-by-9-inch dimensions:
+
+```r
+save_simulation_figure(build_scenario1_figure(scenario1_summary), "Figure5.pdf")
+save_simulation_figure(
+  build_scenario2_figure(scenario2_summary, scenario2_results$metadata$settings),
+  "Figure6.pdf"
+)
+```
+
 Scenario 2 creates `scenario2_summary`, `scenario2_replications`,
 `scenario2_results`, `scenario2_targets`, `scenario2_tables`, and
 `scenario2_report`. Individual simulation rows remain available in R; the
@@ -187,15 +209,19 @@ Viewer report presents the aggregated results rather than thousands of raw
 rows. To run a short check first, open the script with `file.edit(script)`,
 set `quick_run <- TRUE`, `cores <- 2L`, and `replications <- 2L` in its
 configuration block, then source the edited script. When using downloaded
-copies, keep `simulation_helpers.R` in the same folder.
+copies, keep the complete `inst/reproduce` folder together, including
+`simulation_helpers.R`, `final_driver_helpers.R`, `final_study_helpers.R`,
+and `final_reference`.
 
 At the default 1,000 runs per design cell, each full study fits 15,000 simulated
 datasets and can take substantial time.
 Simulation runs use up to 20 parallel workers by default, capped by the
 number of detected logical cores and runs. Edit `cores` to choose
 a smaller worker count, or set `cores <- 1L` for a serial run. The socket-based
-parallel backend works on Windows, macOS, and Linux. Fixed simulation seeds
-preserve results across worker counts in the same R and package environment.
+parallel backend works on Windows, macOS, and Linux. Saved random states and
+single-thread learner settings preserve job identity across worker counts.
+Exact numerical reproduction requires the recorded R, package and platform
+environment; cross-platform floating-point identity is not guaranteed.
 
 You can also run the scripts from a terminal:
 
@@ -207,7 +233,7 @@ Rscript mecCox/inst/reproduce/scenario1.R --cores=20 --replications=100
 
 Without a graphical R session, the scripts print their tables to the console;
 run them in RStudio to display the HTML report and plots. Command-line
-`--replications=N` must be a positive integer and overrides the number of runs
+`--replications=N` must be an integer from 1 through 1,000 and overrides the number of runs
 configured in the script. The quick check defaults to two runs per
 retained design cell when the configured count remains at 1,000 and no
 count is supplied on the command line. A nondefault configured count or an
@@ -247,7 +273,7 @@ remain in memory, with no result-file exports. The first table reports
 log-hazard ratios, standard errors, hazard ratios, and 95% confidence
 intervals. The second reports covariate balance and external-control weight
 diagnostics. The script generates these analyses in the format of
-supplementary Tables S2 and S3; numerical results may vary with random seeds,
+supplementary Tables S3 and S4; numerical results may vary with random seeds,
 learner settings, and software versions.
 
 The R session retains `breast_cancer_estimates`, `breast_cancer_balance`,
@@ -291,7 +317,7 @@ estimation. BART tree count, posterior draws, burn-in, and shrinkage are
 explicit arguments; the default fitting API uses fixed BART settings.
 
 The [two main-paper study scripts](inst/reproduce/README.md) use the study
-designs and estimation procedures for Figures 4 and 5, including lightweight
+designs and estimation procedures for Figures 5 and 6, including lightweight
 tuning and randomized survival-forest splitting. Their settings and
 implementation identifiers are recorded in run metadata. Completed datasets
 are reported during execution and retained in memory after interruption.
@@ -325,13 +351,82 @@ establishes a causal effect, valid risk prediction, or improved efficiency in
 every data-generating process. The user must assess cohort construction,
 overlap, censoring, model fit, and weight stability.
 
+## Supplemental Figures S2–S4
+
+The supplemental reference bundle contains results from 30,000 fresh datasets:
+1,000 replications at each of five treated sample sizes in six settings. All
+MEC-Cox fits use five-fold cross-fitting. S2 compares 50 and 200 covariates using lasso source
+propensity and lasso-Cox prognostic fits; S3 compares four Bregman generators;
+S4 increases the censoring rate. S3 and S4 use the original logistic/Cox fits
+and five survival landmarks. Their designs are separate from Figures 5 and 6.
+
+To redraw the three figures from the saved aggregate data, start a fresh R
+session from the repository root and explicitly call the redraw function:
+
+```r
+reproduce_dir <- file.path("inst", "reproduce")
+source(file.path(reproduce_dir, "supplement_S2_S4_helpers.R"))
+source(file.path(reproduce_dir, "redraw_supplement_S2_S4.R"))
+reference_dir <- file.path(reproduce_dir, "final_supp_S2_S4_reference")
+reference_path <- file.path("reproduction-data", "final_supp_S2_S4_20261015",
+                            "final_figure_reference.rds")
+redraw_supplement_S2_S4(reference_path, reference_dir,
+                       output_directory = "supplement-redraw")
+```
+
+The destination must not exist. Sourcing these files defines functions and
+does not run a simulation. The redraw writes PNG/PDF figures at 12 × 7 inches
+and preserves the original four, seven, and four displayed curves. It requires
+ggplot2 4.0.0, patchwork 1.3.2, gtable 0.3.6, dplyr 1.1.4, and tidyr 1.3.1;
+the namespace dependencies also include survival, MASS, digest, and labeling. Configure
+the rendering library before loading these packages. Plotting temporarily
+uses an available UTF-8 character locale to preserve the Rényi label and
+restores the caller's locale afterward.
+
+For selected saved simulation jobs, use a separate fresh R session with the
+recorded fitting environment:
+
+```r
+reproduce_dir <- file.path("inst", "reproduce")
+reference_dir <- file.path(reproduce_dir, "final_supp_S2_S4_reference")
+source(file.path(reproduce_dir, "supplement_S2_S4_helpers.R"))
+source(file.path(reproduce_dir, "run_supplement_S2_S4.R"))
+run_supplement_S2_S4(c(1L, 5005L, 10001L, 15005L, 20001L, 25005L),
+                     reference_dir, output_directory = "supplement-replays")
+```
+
+Job IDs select the
+frozen configurations and saved random states; changing subset length does
+not choose new states. This serial runner retains every attempted method row
+and writes selected-job records. Selected jobs cannot reproduce full-study
+performance figures. The callable functions are not command-line argument
+parsers; passing options directly to `Rscript run_supplement_S2_S4.R` does not
+launch jobs.
+
+The fitting adapter enforces the recorded R 4.5.1 build, package versions,
+and locale in `final_supp_S2_S4_reference/provenance.rds` and
+`installed_package_versions.csv`. This includes glmnet 4.1.10 for S2.
+Fitting and plotting use distinct package-version requirements; do not
+reuse a rendering session to fit. Exact numerical replay on a different
+platform or dependency stack is not guaranteed.
+
+The saved reference includes all 240,000 method rows, all 240 method/design
+groups, target bindings, dependency records, and file hashes. Each distinct
+target law uses an average of 100 independent super-population calculations
+with 150,000 treated and 300,000 controls. Completed target calculations are
+reused; no public default recomputes them. The primary summaries follow the
+original finite-estimate/finite-standard-error eligibility rule. The reference
+also preserves stricter diagnostic summaries separately; none replace the
+original primary rule. Zero-eligible groups retain their raw attempts and
+diagnostic rows even when the original summary omits that group.
+
 ## Development checks
 
 From the parent directory, run:
 
 ```sh
 R CMD build mecCox
-R CMD check mecCox_0.1.1.tar.gz --no-manual
+R CMD check mecCox_0.1.4.tar.gz --no-manual
 ```
 
 The tests compare ATT-IPW output with the manuscript implementation and with

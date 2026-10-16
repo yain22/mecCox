@@ -7,15 +7,20 @@ This directory contains four runnable analysis scripts:
 | Toy example | [toy_example.R](toy_example.R) | Three-panel figures and numerical summaries for both designs |
 | Simulation 1 | [scenario1.R](scenario1.R) | Simulation summary and figure |
 | Simulation 2 | [scenario2.R](scenario2.R) | Simulation summary and figure |
-| Public breast-cancer case study | [breast_cancer.R](breast_cancer.R) | Two analysis tables in the format of supplementary Tables S2 and S3 |
+| Public breast-cancer case study | [breast_cancer.R](breast_cancer.R) | Two analysis tables in the format of supplementary Tables S3 and S4 |
 
 The breast-cancer data are public datasets included in `survival`; they are
 not subject to the restrictions of the separate SQUIRE/MSK-CHORD application.
 No restricted patient records are included in these examples. The scripts
-display results and retain R objects. The toy script also supports optional
-file export; the other three scripts do not export result files.
+display results and retain R objects. The toy script supports optional file
+export, and the simulation figures can be exported explicitly from R.
 The [case-study instructions](#public-breast-cancer-case-study) appear below
 the simulation instructions.
+
+For the fresh supplemental Figures S2-S4, see the
+[reference, redraw, and selected-job instructions](../../README.md#supplemental-figures-s2s4).
+These callable helpers preserve the distinct supplemental designs and require
+explicit function calls after sourcing.
 
 ## Toy example
 
@@ -134,11 +139,13 @@ information records that environment.
 with the study fitting functions and fixed configurations. Install the package first, for
 example with `R CMD INSTALL mecCox` from the checkout's parent directory.
 Both scripts use `kableExtra`, `htmltools`, and `rstudioapi` to present HTML
-tables, and `rngtools` for deterministic random-stream allocation.
+tables, and `digest` to verify the saved final-study bundle.
+Their figures use `ggplot2`, `patchwork`, and `labeling`.
 Scenario 2 also requires the optional learners `dbarts` and `ranger`:
 
 ```r
-install.packages(c("kableExtra", "htmltools", "rstudioapi", "rngtools"))
+install.packages(c("kableExtra", "htmltools", "rstudioapi", "digest"))
+install.packages(c("ggplot2", "patchwork", "labeling"))
 # Also install these learners for Scenario 2:
 install.packages(c("dbarts", "ranger"))
 ```
@@ -169,8 +176,9 @@ cores <- 20L
 replications <- 1000L
 ```
 
-Edit `replications` to choose the number of Monte Carlo runs per
-design cell. The default is 1,000, matching the full simulation design.
+Edit `replications` to select 1 through 1,000 saved runs per design cell.
+The default is 1,000, matching the full simulation design. Subsets use the
+same global job IDs and saved states as the full run.
 Edit `cores` to choose the maximum worker count.
 
 For Scenario 2, `replications <- 100L` with `quick_run <- FALSE` means
@@ -179,12 +187,22 @@ two MEC-Cox fits. With `quick_run <- TRUE`, the same explicit count gives
 100 runs in each of three cells, or 300 datasets. For a small installation
 check, set all three values as in the example below.
 
-**The scripts keep results in memory and display them; they do not export
-result files.** In RStudio, the complete summary, reference targets, and run
+**The scripts keep results in memory and display them; no result files are
+exported by default.** In RStudio, the complete summary, reference targets, and run
 settings appear as formatted `kableExtra` HTML tables in the **Viewer** pane.
 The figure is drawn on the active graphics device, normally the **Plots**
 pane. The underlying tables, HTML objects, and metadata remain available in
 the session; see [Results in the R session](#results-in-the-r-session) below.
+
+The figures use the manuscript's panel layout, colors, symbols, and legends.
+To save them at the publication dimensions of 12 by 9 inches after a run:
+
+```r
+figure5 <- build_scenario1_figure(scenario1_summary)
+save_simulation_figure(figure5, "Figure5.pdf")
+figure6 <- build_scenario2_figure(scenario2_summary, scenario2_results$metadata$settings)
+save_simulation_figure(figure6, "Figure6.pdf")
+```
 
 To check the installation first, open the script with `file.edit(script)` and
 edit its configuration block to:
@@ -204,7 +222,8 @@ An absolute script path works from any working directory; use forward slashes
 in R paths on Windows. Helpers are found from the sourced file's location
 or the installed package. When downloading files, keep the complete
 `inst/reproduce` directory together, including `simulation_helpers.R`,
-`original_study_helpers.R`, and the `study_reference` subdirectory.
+`final_driver_helpers.R`, `final_study_helpers.R`, and the `final_reference`
+subdirectory.
 
 ## Run simulations from a terminal
 
@@ -229,7 +248,7 @@ Rscript mecCox/inst/reproduce/scenario1.R --cores=20 --replications=100
 Rscript mecCox/inst/reproduce/scenario2.R --cores=20 --replications=100
 ```
 
-`--replications=N` accepts a positive integer and overrides the setting in
+`--replications=N` accepts an integer from 1 through 1,000 and overrides the setting in
 the script. With `--quick`, the count defaults to two if the configured count
 is still 1,000 and no command-line count is supplied. A nondefault configured
 count or an explicit command-line count is retained.
@@ -253,27 +272,40 @@ Rscript mecCox/inst/reproduce/scenario1.R --cores=8
 
 The PSOCK backend works on Windows, macOS, and Linux. A worker pool is reused
 across design cells. Monte Carlo runs execute in parallel; summaries, HTML
-tables, and plots run in the main R process. Reference targets are read from
-the study configurations. Each dataset receives the L'Ecuyer random
-stream allocated by the sample-size-first job grid.
-Changing worker count or scheduling therefore preserves its data and fits
-in the same R and package environment.
+tables, and plots run in the main R process. Reference targets are joined
+from the independently audited target table after fitting. Each dataset
+receives its saved L'Ecuyer state from the full sample-size-first job grid.
+Figure 5 uses seed `2026101306` and Figure 6 uses `2026101304`, with one
+15,000-state chain per figure; settings do not restart that chain.
+Changing worker count or scheduling preserves these job assignments.
 
 ## Study implementation
 
-The `study_reference` directory contains the fitting functions and
-configurations for Figures 4 and 5. The scripts use fixed cross-fitting and
-forest seeds, study-specific tuning, and a `1.96` confidence-limit multiplier.
-Summary metrics include finite estimates with finite standard errors. Thus
-1,000 runs means 1,000 attempted datasets per cell; successful counts are
-reported separately. Implementation identifiers are available in the result
-metadata.
+The `final_reference` directory contains the frozen fitting functions,
+full-precision configurations, all 30,000 saved states, job grid, target
+table, dependency versions and checksums for Figures 5 and 6. The public
+adapter preserves the fixed cross-fitting and forest seeds, study-specific
+learner settings and `1.96` confidence-limit multiplier. It evaluates the
+verified KL cross-derivative analytically while retaining the other formulas.
+Bias and RMSE use finite estimates with finite standard errors; coverage
+also requires finite ordered intervals. All attempted rows, failures and
+diagnostic flags remain available, with the denominators reported separately.
+Implementation identifiers are included in run metadata.
 
-**BART score extraction.** The study functions average latent predictions
-and apply a range-based transformation to obtain source-propensity scores.
+**BART score extraction.** The final studies retain
+`pnorm(colMeans(draws))`, the original output-range heuristic, and no
+duplicate binary offset. The general fitting API intentionally uses posterior
+probability means; its practical defaults are separate from the study protocol.
 
 The study environment used R 4.5.1, `dbarts` 0.9-32, `ranger` 0.17.0,
-and `survival` 3.8-3. Numerical results may vary with software versions.
+and `survival` 3.8-3. The recorded dependency table specifies the complete
+fitting environment. Publication plotting uses `ggplot2` 4.0.0 with the original
+12-by-9-inch layout. Other software versions or platforms can change numerical
+and rendered results; a fixed seed alone does not ensure bit-exact portability.
+
+The older `original_study_helpers.R` and `study_reference` files remain
+pre-final compatibility snapshots. The current scripts do not dispatch through
+them, and their configurations or targets must not be mixed with final results.
 
 ## Scenario 1: linear source selection and prognosis
 
@@ -293,11 +325,14 @@ The conditional event hazard is Weibull with scale `0.00008`, shape `2`, and
 conditional log-hazard ratio `log(0.70)`. The ten prognostic coefficients are
 the logarithms of `1.75, 1.75, 1.60, 1.60, 1.50` and five copies of `1.25`.
 Independent exponential censoring has rate `0.0008`. The common reference
-target is the ATT-weighted marginal Cox projection, approximated using 30,000
-treated and 60,000 external-control superpopulation observations, **not**
-the conditional coefficient `log(0.70)`. The saved reference target is
-approximately `-0.2237787` on the log-hazard-ratio scale. The scripts use that
-saved target in both full and quick runs.
+target is the normalized oracle source-odds ATT-weighted marginal Cox
+projection. Its independent numerical approximation averages 100 roots,
+each using 150,000 treated and 300,000 external-control observations.
+The same law applies to all three sampled ratios and to Scenario 2's
+no-nonlinearity setting. The frozen target is approximately `-0.2202293`,
+with numerical Monte Carlo SE `0.0004264`, on the log-hazard-ratio scale.
+The scripts use the same full-precision target in full and quick runs;
+historical target approximations are retained separately as legacy sensitivity.
 
 The three ATT-IPW rows share the same weighted Cox coefficient and differ
 only in their naive, robust sandwich, or corrected sandwich standard error.
@@ -323,7 +358,7 @@ has 1,000 Monte Carlo runs at each of 15 sample-size and nonlinearity combinatio
 | --- | ---: | ---: |
 | None | 0 | 0 |
 | Mild | 1 | 2 |
-| Severe | 2 | 5 |
+| Severe | 1.5 | 4 |
 
 The source logit adds `kappa_pi * r_pi(X)` to Scenario 1's linear component;
 the control log-hazard adds `kappa_m * r_m(X)` to its linear component. The
@@ -339,17 +374,18 @@ r_m <- 0.45 * sin(X2) + 0.35 * (X3^2 - 1) +
 ```
 
 The remaining event-time, censoring, probability-clipping, and landmark
-settings follow Scenario 1. Saved reference targets were computed separately
-for each nonlinearity setting using 30,000 treated and 60,000 external controls.
+settings follow Scenario 1. Each nonlinearity law has an independently audited
+100-root target under the same numerical protocol. The frozen targets for
+none, mild and severe are approximately `-0.2202293`, `-0.1522758` and
+`-0.1065692`, with numerical Monte Carlo SEs `0.0004264`, `0.0005363` and
+`0.0005457`. Full precision and provenance are stored in the target table.
 The three logistic ATT-IPW comparators still share one point estimate. The
 two MEC-Cox variants use cross-fitted BART source
 probabilities and either Cox or RSF control-survival predictions, with ten
-folds and five landmarks. The script uses lightweight tuning. Within each
-training fold, BART selects 25, 50, or 100 trees using a source-balanced tuning
-subset of at most 100 patients. Candidate and selected fits use 100 posterior
-draws, 50 burn-in iterations, and shrinkage parameter 2. If tuning cannot be
-performed, the fallback is 50 trees, 200 posterior draws, and 100 burn-in
-iterations.
+folds and five landmarks. BART uses the frozen choice of 100 trees,
+shrinkage parameter 2, 300 retained draws and 150 burn-in iterations in each
+training fold. This is the Figure 6 protocol; the separate supplemental
+experiment and general fitting API retain their purpose-specific defaults.
 
 RSF tuning uses at most 100 external controls, split approximately equally
 into training and validation sets. It selects `mtry` and minimum node size
@@ -371,7 +407,7 @@ terminate a native learner that is still computing.
 
 The short `--quick` run keeps all three nonlinearity settings, but uses
 `n1 = 200` and two runs per setting unless a different count is selected.
-It retains BART/RSF tuning, ten-fold cross-fitting, five
+It retains the fixed BART settings, RSF tuning, ten-fold cross-fitting, five
 landmarks, and saved reference targets. Both MEC-Cox variants are fitted.
 Quick-run results cannot establish simulation performance.
 
@@ -430,9 +466,9 @@ one directory so downloaded and installed versions are not mixed.
 The two tables open together as `kableExtra` HTML tables in the RStudio
 **Viewer**. They present the supplementary breast-cancer analyses:
 
-- **Table S2 format:** log-hazard-ratio estimates, standard errors, hazard
+- **Table S3 format:** log-hazard-ratio estimates, standard errors, hazard
   ratios, and 95% confidence intervals for all six method/variance combinations.
-- **Table S3 format:** covariate differences before and after weighting,
+- **Table S4 format:** covariate differences before and after weighting,
   mean and maximum absolute balance differences, counts exceeding 0.10,
   effective sample size, and the coefficient of variation of external-control weights.
 
@@ -457,8 +493,8 @@ for the issue of deaths recorded after recurrence follow-up ended.
 The script creates no result exports. Its objects remain available in R:
 
 ```r
-breast_cancer_estimates   # Table S2 format: estimates and uncertainty
-breast_cancer_balance     # Table S3 format: balance and weight diagnostics
+breast_cancer_estimates   # Table S3 format: estimates and uncertainty
+breast_cancer_balance     # Table S4 format: balance and weight diagnostics
 breast_cancer_results     # analysis results and metadata
 breast_cancer_tables      # formatted HTML tables
 breast_cancer_report      # report displayed in the Viewer
