@@ -133,7 +133,9 @@ fit_final_study_job <- function(job_id, bundle = load_final_study_bundle(),
        fatal_error = fatal, warnings = warnings,
        R_rng_after = get(".Random.seed", .GlobalEnv, inherits = FALSE),
        elapsed = as.numeric(difftime(Sys.time(), start, units = "secs")),
-       source_manifest_md5 = bundle$provenance$manifest_md5)
+       source_manifest_md5 = if (!is.null(bundle$provenance$manifest_md5_by_figure))
+         bundle$provenance$manifest_md5_by_figure[[job$figure]] else
+         bundle$provenance$manifest_md5)
 }
 
 bind_final_study_target <- function(run, bundle = load_final_study_bundle()) {

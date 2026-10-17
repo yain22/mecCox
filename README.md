@@ -88,6 +88,16 @@ settings are near the top of each script. Run `breast_cancer.R` in a fresh R
 session; it installs the original learner versions and CPU Torch runtime in
 a separate library on first use. Reproduction is verified with R 4.5.1 on Windows.
 
+Simulation 2 (Figure 6) uses treated sample sizes 200, 300, 400, 500, and
+600, with four external controls per treated subject and 1,000 replications
+per cell. The source/outcome nonlinearity pairs are `(0, 0)`, `(1, 2)`, and
+`(1.5, 3)`. Its saved RNG states retain 6,000 unchanged runs from the earlier
+design and 9,000 new runs; the default script recomputes all 15,000 datasets.
+Simulation 1 retains its original design and streams. Exact simulation replay
+uses R 4.5.1 and the versions recorded in
+[installed_package_versions.csv](inst/reproduce/final_reference/installed_package_versions.csv),
+including `dbarts` 0.9-32, `ranger` 0.17.0, and `dplyr` 1.1.4.
+
 The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 `survival`. Restricted SQUIRE/MSK-CHORD patient data are not included.
 

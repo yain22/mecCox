@@ -1,7 +1,10 @@
 # Run the second simulation using the frozen final-manuscript study bundle.
 # Run after installing mecCox, dbarts, and ranger:
 #   Rscript path/to/mecCox/inst/reproduce/scenario2.R
-# The default is up to 20 workers; --cores=1 runs sequentially.
+# The default is up to 22 workers; --cores=1 runs sequentially.
+# Figure 6: n1 = 200, 300, 400, 500, 600; n0 = 4*n1;
+# (kappa_pi, kappa_m) = (0,0), (1,2), (1.5,3).
+# Saved job states preserve the 6,000 reused and 9,000 new simulation streams.
 # --quick exercises all three settings with a deliberately reduced workload.
 # In the R console or RStudio, edit the three settings below, then source this
 # file (or run it from the editor). Rscript arguments override these settings.
@@ -10,13 +13,13 @@
 
 # Choose one option: keep its settings line uncommented.
 # Publication replication (full study; takes a long time)
-quick_run <- FALSE; cores <- 20L; replications <- 1000L
+quick_run <- FALSE; cores <- 22L; replications <- 1000L
 
 # Quick learning (same learner hyperparameters)
 # Option 1: fewer design combinations, 200 replications each
-# quick_run <- TRUE; cores <- 20L; replications <- 200L
+# quick_run <- TRUE; cores <- 22L; replications <- 200L
 # Option 2: all design combinations, 200 replications each
-# quick_run <- FALSE; cores <- 20L; replications <- 200L
+# quick_run <- FALSE; cores <- 22L; replications <- 200L
 
 # source() records the current file in an `ofile` frame. Selected lines in an
 # editor have no such frame, so also look in the working directory and package.
@@ -83,7 +86,9 @@ study_configs <- stats::setNames(lapply(study_keys, function(key) {
 }), study_keys)
 study_config <- study_configs[[1L]]
 design <- list(
-  seed = study_reference$root_seeds[["figure6"]],
+  seed = study_reference$figure6_revision$fresh_root_seed,
+  original_seed = study_reference$figure6_revision$original_root_seed,
+  rng_policy = study_reference$figure6_revision$rng_policy,
   nuisance_tuning_seed = study_config$auto_tune_seed,
   replications = options$replications,
   treated_sizes = study_config$sample_size_grid$n1,
@@ -96,7 +101,7 @@ design <- list(
   censoring_rate = study_config$censor_rate,
   conditional_log_hr = study_config$beta_cond,
   engine = "Frozen final-manuscript study bundle",
-  engine_manifest_md5 = study_reference$manifest_md5
+  engine_manifest_md5 = study_reference$manifest_md5_by_figure[["figure6"]]
 )
 settings <- data.frame(
   setting_id = seq_along(study_keys), setting_key = study_keys,
@@ -140,7 +145,16 @@ run_replication <- function(setting, treated_count, replicate, target, design) {
   raw <- fitted$raw
   answer <- make_result(setting, treated_count, raw$rep, fitted$methods,
                         raw$theta_true, design, raw$Estimate, raw$SE, raw$Error)
-  final_driver_add_diagnostics(answer, fitted)
+  answer <- final_driver_add_diagnostics(answer, fitted)
+  origins <- final_reference$bundle$provenance$figure6_revision$jobs
+  origin <- origins[origins$public_job_id == fitted$job$id, , drop = FALSE]
+  stopifnot(nrow(origin) == 1L)
+  answer$revision_job_id <- origin$revision_id
+  answer$source_job_id <- origin$source_id
+  answer$source_kind <- origin$source_kind
+  answer$rng_stream_origin <- origin$stream_origin
+  answer$original_rng_job <- origin$source_id
+  answer
 }
 
 summarize_scenario2_results <- function(results, settings) {
