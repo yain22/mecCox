@@ -1446,17 +1446,21 @@ The final MEC-Cox estimating-equation weight is
 \[
 \widetilde\omega_i
 =
-A_i + (1-A_i)\widehat w_i,
-\qquad i=1,\ldots,n.
+\begin{cases}
+1, & i\in\mathcal I_1 \quad \text{(treated cohort)},\\
+\widehat w_i, & i\in\mathcal I_0 \quad \text{(external-control cohort)}.
+\end{cases}
 \]
 
-Thus, treated patients retain weight one, whereas external-control patients receive the MEC-updated ATT weights.
+Here, we write $\widetilde\omega_i$ for $\widetilde\omega_i(\widehat\lambda)$,
+suppressing dependence on the fitted dual parameter for notational simplicity.
+The tilde distinguishes it from the logistic IPW weight $\widehat\omega_i(\widehat\gamma)$.
 
 Here $\mathcal Y_i(t)$ is the at-risk indicator and $\mathcal N_i(t)$
 is the event counting process. Using the final weights, define
 
 \[
-S_{\mathrm{MEC}, \omega}^{(r)}(t;\theta)
+S_{\mathrm{MEC},\widetilde\omega}^{(r)}(t;\theta)
 =
 \sum_{i=1}^n
 \widetilde\omega_i
@@ -1467,21 +1471,22 @@ S_{\mathrm{MEC}, \omega}^{(r)}(t;\theta)
 and
 
 \[
-\overline A_{\mathrm{MEC}, \omega}(t;\theta)
+\overline A_{\mathrm{MEC},\widetilde\omega}(t;\theta)
 =
-\frac{S_{\mathrm{MEC}, \omega}^{(1)}(t;\theta)}
-     {S_{\mathrm{MEC}, \omega}^{(0)}(t;\theta)} .
+\frac{S_{\mathrm{MEC},\widetilde\omega}^{(1)}(t;\theta)}
+     {S_{\mathrm{MEC},\widetilde\omega}^{(0)}(t;\theta)} .
 \]
 
 The MEC-Cox estimator is the solution to the weighted Cox estimating equation
 
 \[
 U_n^{\mathrm{MEC}}(\theta)
+=U_n^{\widetilde\omega}(\theta)
 =
 \sum_{i=1}^n
 \int
 \widetilde\omega_i
-\{A_i-\overline A_{\mathrm{MEC}, \omega}(t;\theta)\}
+\{A_i-\overline A_{\mathrm{MEC},\widetilde\omega}(t;\theta)\}
 \,d\mathcal{N}_i(t)
 =
 0.
@@ -1498,7 +1503,7 @@ Equivalently, $\widehat\theta_{\mathrm{MEC}}$ maximizes the weighted Cox partial
 \left[
 \theta A_i
 -
-\log\{S_{\mathrm{MEC}, \omega}^{(0)}(t;\theta)\}
+\log\{S_{\mathrm{MEC},\widetilde\omega}^{(0)}(t;\theta)\}
 \right]
 \,d\mathcal{N}_i(t).
 \]
@@ -1579,18 +1584,25 @@ ordinary weighted `coxph()` standard error is not that variance estimator.
     \[
     \widehat w_i=
     g^{-1}\{g(\widehat d_i)+\widehat\lambda^\top\widehat h_i\},
-    \qquad
+    \qquad i\in\mathcal I_0,
+    \]
+
+    \[
     \widetilde\omega_i=
-    \omega_i(\widehat\lambda)=
-    A_i+(1-A_i)\widehat w_i.
+    \widetilde\omega_i(\widehat\lambda)=
+    \begin{cases}
+    1, & i\in\mathcal I_1,\\
+    \widehat w_i, & i\in\mathcal I_0.
+    \end{cases}
     \]
 
 6. Report $\widehat{\mathrm{HR}}_{\mathrm{MEC}}=\exp(\widehat\theta_{\mathrm{MEC}})$ by solving
 
     \[
     U_n^{\mathrm{MEC}}(\theta)=
+    U_n^{\widetilde\omega}(\theta)=
     \sum_{i=1}^n\int\widetilde\omega_i
-    \{A_i-\overline A_{\mathrm{MEC},\omega}(t;\theta)\}
+    \{A_i-\overline A_{\mathrm{MEC},\widetilde\omega}(t;\theta)\}
     \,d\mathcal N_i(t)=0.
     \]
 
@@ -1825,7 +1837,7 @@ stopifnot(max(abs(omega_at_lambda(fixed_lambda) - fixed_omega)) < 1e-10)
 
 For a fixed pair $(\theta,\lambda)$, abbreviate
 $\widetilde\omega_i=\widetilde\omega_i(\lambda)$ and
-$\overline A(t)=\overline A_{\mathrm{MEC},\omega}(t;\theta,\lambda)$.
+$\overline A(t)=\overline A_{\mathrm{MEC},\widetilde\omega}(t;\theta,\lambda)$.
 To make the risk-set calculation explicit, let $\mathcal E(t)$ be the
 subjects with an observed event at $t$, and $\mathcal R(t)$ those still at
 risk, including subjects whose observed follow-up ends at $t$. Define
