@@ -72,9 +72,9 @@ three simulation experiments, and one public-data case study.
 | Study | Script | Results |
 | --- | --- | --- |
 | Toy example | [toy_example.R](inst/reproduce/toy_example.R) | Three-panel figures, empirical SDs, and weight diagnostics for both designs |
-| Simulation 1: linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
-| Simulation 2: increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
-| Simulation 3: empirical assessment of double robustness | [figure7.R](inst/reproduce/figure7.R) | Simulation summary and eight-panel figure |
+| Figure 5: empirical assessment of double robustness | [figure5.R](inst/reproduce/figure5.R) | Simulation summary and eight-panel figure |
+| Simulation 1 (Figure 6): linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
+| Simulation 2 (Figure 7): increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
 | Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S3 and S4 |
 
 Run a script from R or RStudio:
@@ -89,7 +89,7 @@ settings are near the top of each script. Run `breast_cancer.R` in a fresh R
 session; it installs the original learner versions and CPU Torch runtime in
 a separate library on first use. Reproduction is verified with R 4.5.1 on Windows.
 
-Simulation 2 (Figure 6) uses treated sample sizes 200, 300, 400, 500, and
+Simulation 2 (Figure 7) uses treated sample sizes 200, 300, 400, 500, and
 600, with four external controls per treated subject and 1,000 replications
 per cell. The source/outcome nonlinearity pairs are `(0, 0)`, `(1, 2)`, and
 `(1.5, 3)`. Its saved RNG states retain 6,000 unchanged runs from the earlier
@@ -99,12 +99,12 @@ uses R 4.5.1 and the versions recorded in
 [installed_package_versions.csv](inst/reproduce/final_reference/installed_package_versions.csv),
 including `dbarts` 0.9-32, `ranger` 0.17.0, and `dplyr` 1.1.4.
 
-In RStudio, click **Source** in `figure7.R` to display the eight manuscript panels
+In RStudio, click **Source** in `figure5.R` to display the eight manuscript panels
 together in **Plots**. The default uses the archived estimates and keeps the
-median estimated hazard ratios in `figure7_summary`. The commented
+median estimated hazard ratios in `figure5_summary`. The commented
 settings at the top also let you rerun the full experiment or a shorter practice run.
-From the command line, `Rscript inst/reproduce/figure7.R` writes
-`figure7-output/figure7.pdf`. Add `--simulate` to refit the full study with ten workers.
+From the command line, `Rscript inst/reproduce/figure5.R` writes
+`figure5-output/figure5.pdf`. Add `--simulate` to refit the full study with ten workers.
 
 The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 `survival`. Restricted SQUIRE/MSK-CHORD patient data are not included.

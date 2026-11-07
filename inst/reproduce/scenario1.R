@@ -1,4 +1,4 @@
-# Run the first simulation using the frozen final-manuscript study bundle.
+# Run the first simulation (manuscript Figure 6) using the frozen study bundle.
 # Run from any directory after installing mecCox:
 #   Rscript path/to/mecCox/inst/reproduce/scenario1.R
 # A short code-path check is available with --quick; it is not a paper result.

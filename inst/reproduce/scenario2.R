@@ -2,7 +2,7 @@
 # Run after installing mecCox, dbarts, and ranger:
 #   Rscript path/to/mecCox/inst/reproduce/scenario2.R
 # The default is up to 22 workers; --cores=1 runs sequentially.
-# Figure 6: n1 = 200, 300, 400, 500, 600; n0 = 4*n1;
+# Figure 7: n1 = 200, 300, 400, 500, 600; n0 = 4*n1;
 # (kappa_pi, kappa_m) = (0,0), (1,2), (1.5,3).
 # Saved job states preserve the 6,000 reused and 9,000 new simulation streams.
 # --quick exercises all three settings with a deliberately reduced workload.
