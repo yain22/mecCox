@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.md)
 
 `mecCox` provides Cox regression methods for analyses with external controls
-and code to reproduce the paper's toy example, two main simulations, and
+and code to reproduce the paper's toy example, three simulation studies, and
 public case study. The treated cohort is coded `source = 1` and external
 controls `source = 0`.
 
@@ -74,7 +74,7 @@ three simulation experiments, and one public-data case study.
 | Toy example | [toy_example.R](inst/reproduce/toy_example.R) | Three-panel figures, empirical SDs, and weight diagnostics for both designs |
 | Simulation 1: linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
 | Simulation 2: increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
-| Empirical assessment of double robustness | [figure7.R](inst/reproduce/figure7.R) | [Figure 7](docs/figures/figure7.pdf). Estimated marginal ATT hazard ratios under four combinations of propensity-score and control-survival model specification |
+| Simulation 3: empirical assessment of double robustness | [figure7.R](inst/reproduce/figure7.R) | Simulation summary and eight-panel figure |
 | Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S3 and S4 |
 
 Run a script from R or RStudio:
@@ -99,9 +99,12 @@ uses R 4.5.1 and the versions recorded in
 [installed_package_versions.csv](inst/reproduce/final_reference/installed_package_versions.csv),
 including `dbarts` 0.9-32, `ranger` 0.17.0, and `dplyr` 1.1.4.
 
-Sourcing `figure7.R` or running `Rscript inst/reproduce/figure7.R` redraws
-Figure 7 from the archived estimates. Run `Rscript inst/reproduce/figure7.R --simulate`
-to repeat the full experiment with ten workers. Both modes write `figure7-output/figure7.pdf`.
+In RStudio, click **Source** in `figure7.R` to display the eight manuscript panels
+together in **Plots**. The default uses the archived estimates and keeps the
+median estimated hazard ratios in `figure7_summary`. The commented
+settings at the top also let you rerun the full experiment or a shorter practice run.
+From the command line, `Rscript inst/reproduce/figure7.R` writes
+`figure7-output/figure7.pdf`. Add `--simulate` to refit the full study with ten workers.
 
 The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 `survival`. Restricted SQUIRE/MSK-CHORD patient data are not included.
