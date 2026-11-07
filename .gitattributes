@@ -14,3 +14,4 @@ LICENSE text eol=lf
 inst/reproduce/final_reference/** -text !eol
 inst/reproduce/final_plot_reference/** -text !eol
 reproduction-data/final_main_L5_20261013/** -text !eol
+inst/reproduce/figure7_study/** -text !eol

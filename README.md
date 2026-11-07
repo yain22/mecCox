@@ -67,13 +67,14 @@ The included `example_external_controls` data are simulated.
 ## Run the toy example, simulations, and public case study
 
 The repository provides runnable code for a toy example with two designs,
-two simulation experiments, and one public-data case study:
+three simulation experiments, and one public-data case study.
 
 | Study | Script | Results |
 | --- | --- | --- |
 | Toy example | [toy_example.R](inst/reproduce/toy_example.R) | Three-panel figures, empirical SDs, and weight diagnostics for both designs |
 | Simulation 1: linear source selection and prognosis | [scenario1.R](inst/reproduce/scenario1.R) | Simulation summary and nine-panel figure |
 | Simulation 2: increasing nonlinearity | [scenario2.R](inst/reproduce/scenario2.R) | Simulation summary and nine-panel figure |
+| Empirical assessment of double robustness | [figure7.R](inst/reproduce/figure7.R) | [Figure 7](docs/figures/figure7.pdf). Estimated marginal ATT hazard ratios under four combinations of propensity-score and control-survival model specification |
 | Breast-cancer case study | [breast_cancer.R](inst/reproduce/breast_cancer.R) | Hazard-ratio estimates and covariate/weight diagnostics in the format of supplementary Tables S3 and S4 |
 
 Run a script from R or RStudio:
@@ -97,6 +98,10 @@ Simulation 1 retains its original design and streams. Exact simulation replay
 uses R 4.5.1 and the versions recorded in
 [installed_package_versions.csv](inst/reproduce/final_reference/installed_package_versions.csv),
 including `dbarts` 0.9-32, `ranger` 0.17.0, and `dplyr` 1.1.4.
+
+Sourcing `figure7.R` or running `Rscript inst/reproduce/figure7.R` redraws
+Figure 7 from the archived estimates. Run `Rscript inst/reproduce/figure7.R --simulate`
+to repeat the full experiment with ten workers. Both modes write `figure7-output/figure7.pdf`.
 
 The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 `survival`. Restricted SQUIRE/MSK-CHORD patient data are not included.
