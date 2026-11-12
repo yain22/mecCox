@@ -1,11 +1,15 @@
 bibentry(
   bibtype = "Unpublished",
   title = paste(
-    "Balancing Machine-Learned Prognostic Scores to Improve Efficiency in ATT",
-    "Marginal Hazard-Ratio Estimation with Inverse-Probability-Weighted Cox",
+    "Doubly Robust Estimation of the ATT Marginal Hazard Ratio by Balancing",
+    "Machine-Learned Prognostic Scores in Inverse-Probability-Weighted Cox",
     "Regression"
   ),
-  author = person(given = c("Se", "Yoon"), family = "Lee"),
+  author = c(
+    person(given = c("Se", "Yoon"), family = "Lee"),
+    person(given = "Yonghyun", family = "Kwon"),
+    person(given = c("Jae", "Kwang"), family = "Kim")
+  ),
   year = "2026",
   note = "Manuscript under review.",
   header = paste(

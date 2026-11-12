@@ -111,8 +111,8 @@ The breast-cancer example uses the public `gbsg` and `rotterdam` data from
 
 ## References
 
-Lee, S. Y. (2026). *Balancing Machine-Learned Prognostic Scores to Improve
-Efficiency in ATT Marginal Hazard-Ratio Estimation with
+Lee, S. Y., Kwon, Y., & Kim, J. K. (2026). *Doubly Robust Estimation of the ATT
+Marginal Hazard Ratio by Balancing Machine-Learned Prognostic Scores in
 Inverse-Probability-Weighted Cox Regression*. **Under review.**
 
 Shu, D., Young, J. G., Toh, S., & Wang, R. (2021).
